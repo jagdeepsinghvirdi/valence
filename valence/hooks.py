@@ -43,7 +43,9 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"Work Order" : "public/js/work_order.js",
+			"Production Plan":"public/js/production_plan.js"
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -129,21 +131,33 @@ app_license = "mit"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+	"Job Card": "valence.valence.override.job_card.JobCard",
+	"Production Plan":"valence.valence.override.production_plan.ProductionPlan",
+	"Work Order":"valence.valence.override.work_order.WorkOrder"
+}
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Quality Inspection": {
+		"on_submit": "valence.valence.doc_events.quality_inspection.on_submit",
+	},
+    "Stock Entry":{
+        "validate":"valence.valence.doc_events.stock_entry.validate"
+    },
+    "Work Order": {
+		"on_submit": "valence.valence.doc_events.work_order.on_submit",
+		"on_update_after_submit":"valence.valence.doc_events.work_order.on_update_after_submit",
+	},
+	"Job Card": {
+		"on_submit": "valence.valence.doc_events.job_card.on_submit",
+		"before_submit":"valence.valence.doc_events.job_card.before_submit",
+		"after_submit":"valence.valence.doc_events.job_card.after_submit",
+	},
+}
 
 # Scheduled Tasks
 # ---------------

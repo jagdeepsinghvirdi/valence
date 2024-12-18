@@ -26,8 +26,9 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/valence/css/valence.css"
-# app_include_js = "/assets/valence/js/valence.js"
-
+app_include_js = [
+	"valence.bundle.js"
+]
 # include js, css files in header of web template
 # web_include_css = "/assets/valence/css/valence.css"
 # web_include_js = "/assets/valence/js/valence.js"
@@ -144,6 +145,8 @@ override_doctype_class = {
 doc_events = {
 	"Quality Inspection": {
 		"on_submit": "valence.valence.doc_events.quality_inspection.on_submit",
+		"before_save": "valence.valence.doc_events.quality_inspection.before_save",
+		"before_submit":"valence.valence.doc_events.quality_inspection.before_submit",
 	},
     "Stock Entry":{
         "validate":"valence.valence.doc_events.stock_entry.validate"
@@ -159,6 +162,9 @@ doc_events = {
 	},
 }
 
+from erpnext.stock.serial_batch_bundle import SerialBatchCreation
+from valence.valence.monkey_patch.serial_batch_bundle import create_batch
+SerialBatchCreation.create_batch = create_batch
 # Scheduled Tasks
 # ---------------
 
@@ -188,9 +194,9 @@ doc_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "valence.event.get_events"
-# }
+override_whitelisted_methods = {
+	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections"
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

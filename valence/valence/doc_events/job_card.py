@@ -10,7 +10,11 @@ def on_submit(self,method):
 				row.db_set("completed_quantity",self.total_completed_qty)
 				employee =  self.time_logs[0].employee
 				row.db_set("employee",employee)
-				
+				time = self.total_time_in_mins * 60
+				row.db_set("total_time",time)
+				time_diff = (self.total_time_in_mins - self.time_required)*60
+				row.db_set("time_difference",time_diff)
+
 def before_submit(self, method):
 	work_order = frappe.get_doc("Work Order", self.work_order)
 	work_order.db_set("disable_auto_update" , 1)

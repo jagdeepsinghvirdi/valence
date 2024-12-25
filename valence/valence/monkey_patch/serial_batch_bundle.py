@@ -24,9 +24,11 @@ def create_batch(self):
 			quality_inspection = frappe.get_doc("Quality Inspection", data.get("quality_inspection"))
 			retest_date = quality_inspection.retest_date
 			expiry_date = quality_inspection.expiry_date
+			manufacturing_date = quality_inspection.manufacturing_date
 			dct.update({
 			"retest_date": retest_date,
 			"expiry_date":expiry_date,
+			"manufacturing_date":manufacturing_date,
 		})
 
 	

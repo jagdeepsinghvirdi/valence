@@ -12,7 +12,7 @@ def on_submit(self,method):
 				row.db_set("employee",employee)
 				time = self.total_time_in_mins * 60
 				row.db_set("total_time",time)
-				time_diff = (self.total_time_in_mins - self.time_required)*60
+				time_diff = (self.time_required- self.total_time_in_mins)*60
 				row.db_set("time_difference",time_diff)
 
 def before_submit(self, method):

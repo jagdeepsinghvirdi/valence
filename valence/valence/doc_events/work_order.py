@@ -3,12 +3,21 @@ from frappe import _
 from frappe.utils import cint, flt, get_datetime
 
 
+def set_batch_serial_check_box(self,method):
+	self.has_batch_no = frappe.db.get_value("Item",self.production_item,"has_batch_no")
+	self.has_serial_no = frappe.db.get_value("Item",self.production_item,"has_serial_no")
+	if self.has_batch_no:
+		self.batch_size = self.qty
+
 def on_submit(self, method):
 	for row in self.operations:
 		row.db_set("from_time",row.planned_start_time)
 		row.db_set("to_time",row.planned_end_time)
-	self.reload()
-
+	ref_doc_name = frappe.db.get_value("Batch", {"reference_name": self.name}, "name")
+	if ref_doc_name:
+		self.db_set("batch_no", ref_doc_name)
+	else:
+		frappe.throw("No Batch found for the given reference name.")	
 
 def on_update_after_submit(self, method):
 	if self.disable_auto_update:
@@ -26,13 +35,14 @@ def on_update_after_submit(self, method):
 			for i in range(1, len(self.operations)):
 				prev_op = self.operations[i - 1]
 				current_op = self.operations[i]
+				doc = frappe.get_doc("Manufacturing Settings")
 
 				if current_op.from_time and prev_op.to_time:
-					if get_datetime(current_op.from_time) < get_datetime(prev_op.to_time):
+					if get_datetime(current_op.from_time) < get_datetime(prev_op.to_time) and not doc.custom_job_card_over_lap_time_not_required:
 						frappe.throw(
-							_("Row {row}: 'From Time' ({from_time}) must be greater than or equal to 'To Time' ({to_time}) of the previous operation.")
+							_("{row}: 'From Time' ({from_time}) must be greater than or equal to 'To Time' ({to_time}) of the previous operation.")
 							.format(
-								row=i + 1,
+								row=current_op.operation,
 								from_time=current_op.from_time,
 								to_time=prev_op.to_time
 							)

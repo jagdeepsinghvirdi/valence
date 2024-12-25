@@ -77,10 +77,10 @@ doctype_js = {"Work Order" : "public/js/work_order.js",
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "valence.utils.jinja_methods",
-# 	"filters": "valence.utils.jinja_filters"
-# }
+jinja = {
+	"methods": ["valence.valence.jinja.get_batch_and_lot_number_from_serial_and_batch_bundle"],
+	# "filters": "valence.utils.jinja_filters"
+}
 
 # Installation
 # ------------
@@ -135,7 +135,9 @@ doctype_js = {"Work Order" : "public/js/work_order.js",
 override_doctype_class = {
 	"Job Card": "valence.valence.override.job_card.JobCard",
 	"Production Plan":"valence.valence.override.production_plan.ProductionPlan",
-	"Work Order":"valence.valence.override.work_order.WorkOrder"
+	"Work Order":"valence.valence.override.work_order.WorkOrder",
+	"Stock Entry":"valence.valence.override.stock_entry.StockEntry",
+	"Batch":"valence.valence.override.batch.Batch",
 }
 
 # Document Events
@@ -154,6 +156,8 @@ doc_events = {
     "Work Order": {
 		"on_submit": "valence.valence.doc_events.work_order.on_submit",
 		"on_update_after_submit":"valence.valence.doc_events.work_order.on_update_after_submit",
+		"validate":"valence.valence.doc_events.work_order.set_batch_serial_check_box",
+		"after_submit":"valence.valence.doc_events.work_order.after_submit"
 	},
 	"Job Card": {
 		"on_submit": "valence.valence.doc_events.job_card.on_submit",
@@ -168,23 +172,14 @@ SerialBatchCreation.create_batch = create_batch
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"valence.tasks.all"
-# 	],
-# 	"daily": [
-# 		"valence.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"valence.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"valence.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"valence.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+    "cron": {
+        "0 0 * * *": [
+            "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches"
+        ]
+    }
+}
+
 
 # Testing
 # -------

@@ -13,6 +13,37 @@ from frappe.utils import (
 )
 
 class WorkOrder(_WorkOrder):
+	def get_status(self, status=None):
+		"""Return the status based on stock entries against this work order"""
+		under_production = flt(frappe.db.get_single_value("Manufacturing Settings", "under_production_allowance_percentage"))
+
+		if not status:
+			status = self.status
+
+		if self.docstatus == 0:
+			status = "Draft"
+		elif self.docstatus == 1:
+			if status != "Stopped":
+				status = "Not Started"
+				if flt(self.material_transferred_for_manufacturing) > 0:
+					status = "In Process"
+
+				total_qty = flt(self.produced_qty) + flt(self.process_loss_qty)
+				allowed_qty = flt(self.qty) * (100 - under_production) / 100.0 # Finbyz Changes to allow under production
+				
+				if flt(total_qty) >= allowed_qty:
+					status = "Completed"
+		else:
+			status = "Cancelled"
+
+		if (
+			self.skip_transfer
+			and self.produced_qty
+			and self.qty > (flt(self.produced_qty) + flt(self.process_loss_qty))
+		):
+			status = "In Process"
+
+		return status
 	def set_work_order_operations(self):
 		"""Fetch operations from BOM and set in 'Work Order'"""
 

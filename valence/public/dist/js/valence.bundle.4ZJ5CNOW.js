@@ -2,7 +2,6 @@
   // ../valence/valence/public/js/transaction.js
   erpnext.TransactionController = class TransactionController extends erpnext.TransactionController {
     make_quality_inspection() {
-      console.log("make_quality_inspection in valecne");
       let data = [];
       const fields = [
         {
@@ -151,6 +150,15 @@
         dialog.show();
       }
     }
+    has_inspection_required(item) {
+      if (this.frm.doc.doctype === "Stock Entry" && this.frm.doc.purpose == "Manufacture") {
+        if ((item.is_finished_item || item.is_scrap_item) && !item.quality_inspection) {
+          return true;
+        }
+      } else if (!item.quality_inspection) {
+        return true;
+      }
+    }
   };
 })();
-//# sourceMappingURL=valence.bundle.IQDJHV3D.js.map
+//# sourceMappingURL=valence.bundle.4ZJ5CNOW.js.map

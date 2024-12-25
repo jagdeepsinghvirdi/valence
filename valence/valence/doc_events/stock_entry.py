@@ -2,7 +2,7 @@ import frappe
 from frappe import _
 
 def validate(self, method):
-	if self.work_order and self.stock_entry_type == "Manufacture":
+	if self.work_order and self.stock_entry_type in [ "Manufacture","Material Transfer for Manufacture"]:
 		manufacturing_settings_doc = frappe.get_doc("Manufacturing Settings")
 		item_groups_to_validate = [row.item_group for row in manufacturing_settings_doc.custom_validate_item_group]
 		wo_doc = frappe.get_doc("Work Order", self.work_order)

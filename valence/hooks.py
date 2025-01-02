@@ -45,9 +45,13 @@ app_include_js = [
 
 # include js in doctype views
 doctype_js = {"Work Order" : "public/js/work_order.js",
-			"Production Plan":"public/js/production_plan.js"
+			"Production Plan":"public/js/production_plan.js",
+			"Sales Invoice":"public/js/sales_invoice.js",
+			"Delivery Note":"public/js/delivery_note.js",
+			"Stock Entry":"public/js/stock_entry.js",
+			
 }
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_list_js = {"Batch":"public/js/batch_list.js",}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -138,6 +142,9 @@ override_doctype_class = {
 	"Work Order":"valence.valence.override.work_order.WorkOrder",
 	"Stock Entry":"valence.valence.override.stock_entry.StockEntry",
 	"Batch":"valence.valence.override.batch.Batch",
+	"Sales Invoice":"valence.valence.override.sales_invoice.SalesInvoice",
+	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
+	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
 }
 
 # Document Events
@@ -146,12 +153,16 @@ override_doctype_class = {
 
 doc_events = {
 	"Quality Inspection": {
-		"on_submit": "valence.valence.doc_events.quality_inspection.on_submit",
+		"on_submit":[ "valence.valence.doc_events.quality_inspection.on_submit","valence.valence.doc_events.quality_inspection.transfer_material_from_quality_inspection_warehouse"],
 		"before_save": "valence.valence.doc_events.quality_inspection.before_save",
 		"before_submit":"valence.valence.doc_events.quality_inspection.before_submit",
 	},
     "Stock Entry":{
-        "validate":"valence.valence.doc_events.stock_entry.validate"
+        "on_submit":"valence.valence.doc_events.stock_entry.on_submit",
+		"before_submit":["valence.valence.doc_events.stock_entry.validate_manufacture_entry","valence.valence.doc_events.stock_entry.stock_entry_quality_inspection_validation"],
+		"on_cancel":"valence.valence.doc_events.stock_entry.on_cancel_manufacture_entry",
+		"validate":"valence.valence.doc_events.stock_entry.validate"
+
     },
     "Work Order": {
 		"on_submit": "valence.valence.doc_events.work_order.on_submit",
@@ -173,6 +184,9 @@ SerialBatchCreation.create_batch = create_batch
 # ---------------
 
 scheduler_events = {
+	"all":[
+		"valence.valence.doc_events.batch.real_time_status_update"
+	],
     "cron": {
         "0 0 * * *": [
             "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches"
@@ -180,7 +194,10 @@ scheduler_events = {
     }
 }
 
-
+fixtures = [
+    {"dt": "Custom Field", "filters": [["module", "in", ["Valence"]]]},
+    {"dt": "Property Setter", "filters": [["module", "in", ["Valence"]]]},
+]
 # Testing
 # -------
 
@@ -190,7 +207,8 @@ scheduler_events = {
 # ------------------------------
 #
 override_whitelisted_methods = {
-	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections"
+	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections",
+	"chemical.query.get_batch_no":"valence.valence.override.whitelisted_method.query.get_batch_no"
 }
 #
 # each overriding function accepts a `data` argument;

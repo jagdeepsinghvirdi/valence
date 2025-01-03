@@ -175,6 +175,9 @@ doc_events = {
 		"before_submit":"valence.valence.doc_events.job_card.before_submit",
 		"after_submit":"valence.valence.doc_events.job_card.after_submit",
 	},
+	"Item":{
+		"validate":"valence.valence.doc_events.item.validate",
+	}
 }
 
 from erpnext.stock.serial_batch_bundle import SerialBatchCreation

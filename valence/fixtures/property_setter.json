@@ -81,22 +81,6 @@
  },
  {
   "default_value": null,
-  "doc_type": "Quality Inspection",
-  "docstatus": 0,
-  "doctype": "Property Setter",
-  "doctype_or_field": "DocField",
-  "field_name": "reference_type",
-  "is_system_generated": 1,
-  "modified": "2025-01-01 12:54:54.866627",
-  "module": "Valence",
-  "name": "Quality Inspection-reference_type-options",
-  "property": "options",
-  "property_type": "Text",
-  "row_name": null,
-  "value": "\nPurchase Receipt\nPurchase Invoice\nDelivery Note\nSales Invoice\nStock Entry\nOutward Sample\nInward Sample"
- },
- {
-  "default_value": null,
   "doc_type": "Purchase Receipt",
   "docstatus": 0,
   "doctype": "Property Setter",

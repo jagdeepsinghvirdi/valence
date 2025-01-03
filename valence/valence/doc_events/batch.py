@@ -26,3 +26,4 @@ def real_time_status_update():
 			batch_doc.save()  
 
 	frappe.db.commit()  
+	

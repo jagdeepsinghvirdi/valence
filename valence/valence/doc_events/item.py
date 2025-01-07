@@ -18,7 +18,8 @@ def validate(self,method):
 		'Mixture Solvent': 'MS',
 		'Recover Solvent': 'RS',
 		'Printing & Stationery': 'ST',
-		'WIP BUILDING': 'WP'
+		'WIP BUILDING': 'WP',
+		"Services":"SR"
 	}
 	prefix = None
 	if frappe.db.get_value("Item Group",self.item_group,"parent_item_group") != "All Item Groups":

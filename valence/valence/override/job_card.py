@@ -1,5 +1,5 @@
 import frappe
-from erpnext.manufacturing.doctype.job_card.job_card import JobCard as _JobCard
+from erpnext.manufacturing.doctype.job_card.job_card import JobCard as _JobCard ,OverlapError
 from frappe.utils import (
 	add_days,
 	add_to_date,
@@ -15,8 +15,6 @@ from frappe.utils import (
 )
 from frappe import _, bold
 
-class OverlapError(frappe.ValidationError):
-	pass
 class JobCard(_JobCard):
 	def validate_time_logs(self):
 		self.total_time_in_mins = 0.0

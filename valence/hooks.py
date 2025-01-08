@@ -177,7 +177,11 @@ doc_events = {
 	},
 	"Item":{
 		"validate":"valence.valence.doc_events.item.validate",
+	},
+	"Item Group":{
+		"validate":"valence.valence.doc_events.item_group.set_abbr_for_item_group"
 	}
+
 }
 
 from erpnext.stock.serial_batch_bundle import SerialBatchCreation

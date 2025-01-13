@@ -93,7 +93,9 @@ class WorkOrder(_WorkOrder):
 
 		for correct_index, operation in enumerate(operations, start=1):
 			operation.idx = correct_index
+			# use multi level bom then sequence id set as per idx
 			if self.use_multi_level_bom:
 				operation.sequence_id = correct_index
+			# changes end
 		self.set("operations", operations)
 		self.calculate_time()

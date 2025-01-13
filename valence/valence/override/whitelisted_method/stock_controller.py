@@ -34,7 +34,7 @@ def make_quality_inspections(doctype, docname, items):
 				"item_serial_no": item.get("serial_no").split("\n")[0] if item.get("serial_no") else None,
 				"batch_no": item.get("batch_no"),
 				"lot_no":item.get("lot_no"),
-				"ar_no":item.get("ar_no"),
+				"ar_no":item.get("ar_no"), # add ar no when quatlity inspection is created
 				"ref_item": item.get("ref_item"),
 				"concentration": item.get("concentration"),
 			}
@@ -73,6 +73,7 @@ class StockController(_StockController):
 
 			if flt(d.qty) > 0.0 and d.get("batch_no") and self.get("posting_date") and self.docstatus < 2:
 				expiry_date = frappe.get_cached_value("Batch", d.get("batch_no"), "expiry_date")
+				# add condition like expiry date on retest date 
 				retest_date = frappe.get_cached_value("Batch", d.get("batch_no"), "retest_date")
 
 				if retest_date and getdate(retest_date) < getdate(self.posting_date):
@@ -82,7 +83,7 @@ class StockController(_StockController):
 						),
 						BatchExpiredError,
 					)
-
+				# changes end
 				if expiry_date and getdate(expiry_date) < getdate(self.posting_date):
 					frappe.throw(
 						_("Row #{0}: The batch {1} has already expired.").format(

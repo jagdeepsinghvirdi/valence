@@ -39,7 +39,7 @@ def get_batches_from_stock_ledger_entries(searchfields, txt, filters, start=0, p
 			batch_table.concentration,
 		)
 		.where((batch_table.expiry_date >= expiry_date) | (batch_table.expiry_date.isnull()))
-		.where((batch_table.retest_date >= expiry_date) | (batch_table.retest_date.isnull()))
+		.where((batch_table.retest_date >= expiry_date) | (batch_table.retest_date.isnull())) # add condition for retest date
 		.where(stock_ledger_entry.is_cancelled == 0)
 		.where(
 			(stock_ledger_entry.item_code == filters.get("item_code"))
@@ -92,7 +92,7 @@ def get_batches_from_serial_and_batch_bundle(searchfields, txt, filters, start=0
 			batch_table.concentration,
 		)
 		.where((batch_table.expiry_date >= expiry_date) | (batch_table.expiry_date.isnull()))
-		.where((batch_table.retest_date >= expiry_date) | (batch_table.retest_date.isnull()))
+		.where((batch_table.retest_date >= expiry_date) | (batch_table.retest_date.isnull())) # add condition for retest date
 		.where(stock_ledger_entry.is_cancelled == 0)
 		.where(
 			(stock_ledger_entry.item_code == filters.get("item_code"))

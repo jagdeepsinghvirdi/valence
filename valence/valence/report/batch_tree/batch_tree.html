@@ -1,0 +1,110 @@
+<div>
+    <style>
+        .indent-0 { margin-left: 0; }
+        .indent-1 { margin-left: 1.5rem; }
+        .indent-2 { margin-left: 3rem; }
+        .indent-3 { margin-left: 4.5rem; }
+        .indent-4 { margin-left: 6rem; }
+        .indent-5 { margin-left: 7.5rem; }
+        
+        .indent-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        
+        .indent-1:before,
+        .indent-2:before,
+        .indent-3:before,
+        .indent-4:before,
+        .indent-5:before {
+            content: "";
+            position: absolute;
+            left: -1rem;
+            top: 50%;
+            width: 0.75rem;
+            height: 1px;
+            background-color: #dee2e6;
+        }
+        
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2rem;
+        }
+        
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .table th,
+        .table td {
+            border: 1px solid #dee2e6;
+            padding: 0.75rem;
+        }
+        
+        .table thead th {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        .table td {
+            vertical-align: top;
+            position: relative;
+        }
+        
+        .has-children:after {
+            content: "";
+            position: absolute;
+            left: 0.75rem;
+            top: 100%;
+            width: 1px;
+            height: 100%;
+            background-color: #dee2e6;
+        }
+    </style>
+
+    <div class="report-header">
+        <h4>
+            {%= filters.batch || "" %}
+        </h4>
+        <h4>
+            {%= filters.work_order || "" %}
+        </h4>
+    </div>
+
+    <div>
+        <h2>Stock Entry Report</h2>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Item Code</th>
+                    <th>Item Name</th>
+                    <th>Item Group</th>
+                    <th>Quantity</th>
+                    <th>Batch No</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for(var i=0; i<data.length; i++) { 
+                    var row = data[i]; %}
+                    <tr>
+                        <td class="{%= row.has_children ? 'has-children' : '' %}">
+                            <div class="indent-wrapper">
+                                <div class="indent-{%= row.indent || 0 %}">
+                                    {%= row.item_code || "" %}
+                                </div>
+                            </div>
+                        </td>
+                        <td>{%= row.item_name || "" %}</td>
+                        <td>{%= row.item_group || "" %}</td>
+                        <td>{%= row.qty || "" %}</td>
+                        <td>{%= row.batch_no || "" %}</td>
+                    </tr>
+                {% } %}
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -29,6 +29,7 @@ class StockEntry(_StockEntry):
 			as_dict=1,
 		)
 		precision = frappe.get_precision("Stock Entry Detail", "qty")
+		# under production as mention in manufacturing settings
 		under_production = flt(frappe.db.get_single_value("Manufacturing Settings", "under_production_allowance_percentage"))
 		for _key, row in available_materials.items():
 			remaining_qty_to_produce = flt(wo_data.trans_qty) - flt(wo_data.produced_qty)
@@ -41,7 +42,7 @@ class StockEntry(_StockEntry):
 					qty = (flt(row.qty))
 				else:
 					qty = (flt(row.qty) * flt(self.fg_completed_qty)) / remaining_qty_to_produce
-
+			# changes end
 			item = row.item_details
 			if cint(frappe.get_cached_value("UOM", item.stock_uom, "must_be_whole_number")):
 				qty = frappe.utils.ceil(qty)
@@ -86,6 +87,7 @@ class StockEntry(_StockEntry):
 
 			if flt(d.qty) > 0.0 and d.get("batch_no") and self.get("posting_date") and self.docstatus < 2:
 				expiry_date = frappe.get_cached_value("Batch", d.get("batch_no"), "expiry_date")
+				# add validation retest date in same way work for expiry date 
 				retest_date = frappe.get_cached_value("Batch", d.get("batch_no"), "retest_date")
 
 				if retest_date and getdate(retest_date) < getdate(self.posting_date):
@@ -95,7 +97,7 @@ class StockEntry(_StockEntry):
 						),
 						BatchExpiredError,
 					)
-
+				# changes end
 				if expiry_date and getdate(expiry_date) < getdate(self.posting_date):
 					frappe.throw(
 						_("Row #{0}: The batch {1} has already expired.").format(

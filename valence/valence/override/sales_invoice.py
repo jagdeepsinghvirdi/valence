@@ -33,6 +33,7 @@ class SalesInvoice(_SalesInvoice):
 
 			if flt(d.qty) > 0.0 and d.get("batch_no") and self.get("posting_date") and self.docstatus < 2:
 				expiry_date = frappe.get_cached_value("Batch", d.get("batch_no"), "expiry_date")
+				# add validation retest date in same way work for expiry date 
 				retest_date = frappe.get_cached_value("Batch", d.get("batch_no"), "retest_date")
 
 				if retest_date and getdate(retest_date) < getdate(self.posting_date):
@@ -42,7 +43,7 @@ class SalesInvoice(_SalesInvoice):
 						),
 						BatchExpiredError,
 					)
-
+				# changes end
 				if expiry_date and getdate(expiry_date) < getdate(self.posting_date):
 					frappe.throw(
 						_("Row #{0}: The batch {1} has already expired.").format(

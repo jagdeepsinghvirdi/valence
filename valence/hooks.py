@@ -180,7 +180,11 @@ doc_events = {
 	},
 	"Item Group":{
 		"validate":"valence.valence.doc_events.item_group.set_abbr_for_item_group"
-	}
+	},
+	("Material Request","Purchase Order","Stock Entry","Quality Inspection") :{
+      "before_insert": "valence.valence.doc_events.workflow_state_change.before_insert",
+      "before_validate": "valence.valence.doc_events.workflow_state_change.before_validate",
+  },
 
 }
 
@@ -203,7 +207,6 @@ scheduler_events = {
 
 fixtures = [
     {"dt": "Custom Field", "filters": [["module", "in", ["Valence"]]]},
-    {"dt": "Property Setter", "filters": [["module", "in", ["Valence"]]]},
 ]
 # Testing
 # -------

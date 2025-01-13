@@ -25,8 +25,12 @@ class Batch(_Batch):
 
 		while not self.batch_id:
 			if batch_number_series:
+				current_year = datetime.now().year
+				last_two_digits = str(current_year)[-2:]
 				if self.posting_date:
 					batch_number_series = batch_number_series.replace("posting_date", self.posting_date)
+					batch_number_series = batch_number_series.replace("yy", str(last_two_digits))
+
 				else:
 					batch_number_series = batch_number_series.replace("posting_date", nowdate())
 				self.batch_id = make_autoname(batch_number_series, doc=self)
@@ -46,6 +50,7 @@ class Batch(_Batch):
 		Get a name generated for a Batch from the Batch's naming series.
 		:return: The string that was generated.
 		"""
+		# override this function for changing basic naming series of batch 
 		naming_series_prefix = _get_batch_prefix()
 		current_year = datetime.now().year
 		current_month = datetime.now().month
@@ -55,6 +60,7 @@ class Batch(_Batch):
 		naming_series_prefix = naming_series_prefix.replace("yy", str(last_two_digits))
 		naming_series_prefix = naming_series_prefix.replace("mm", str(current_month))
 		naming_series_prefix = naming_series_prefix.replace("abbr", frappe.db.get_value("Item",self.item,"abbr"))
+		# changes end
 		key = _make_naming_series_key(naming_series_prefix)
 		name = make_autoname(key)
 

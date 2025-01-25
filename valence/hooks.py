@@ -145,6 +145,7 @@ override_doctype_class = {
 	"Sales Invoice":"valence.valence.override.sales_invoice.SalesInvoice",
 	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
+	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
 }
 
 # Document Events
@@ -180,6 +181,9 @@ doc_events = {
 	},
 	"Item Group":{
 		"validate":"valence.valence.doc_events.item_group.set_abbr_for_item_group"
+	},
+	"Purchase Receipt":{
+		"before_submit":"valence.valence.doc_events.purchase_receipt.before_submit"
 	},
 	("Material Request","Purchase Order","Stock Entry","Quality Inspection") :{
       "before_insert": "valence.valence.doc_events.workflow_state_change.before_insert",

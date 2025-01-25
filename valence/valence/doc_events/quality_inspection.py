@@ -60,13 +60,19 @@ def create_qc_for_retest_batches():
 		frappe.db.commit()
 
 def transfer_material_from_quality_inspection_warehouse(self,method):
-	if self.reference_type and self.reference_name and self.reference_type == "Stock Entry":
+	if self.reference_type and self.reference_name and self.reference_type in ["Stock Entry","Purchase Receipt"]:
 		doc = frappe.get_doc(self.reference_type, self.reference_name)
-		if doc.stock_entry_type == "Manufacture":
-			material_transfer(self, doc)
+		if self.reference_type == "Stock Entry":
+			if doc.stock_entry_type == "Manufacture":
+				material_transfer(self, doc)
+		elif self.reference_type == "Purchase Receipt":
+			material_transfer(self,doc)
 
 def material_transfer(self, ref_doc):
-	se_doc = frappe.get_doc("Stock Entry",self.reference_name)
+	if self.reference_type == "Stock Entry":
+		se_doc = frappe.get_doc("Stock Entry",self.reference_name)
+	elif self.reference_type == "Purchase Receipt":
+		se_doc = frappe.get_doc("Purchase Receipt",self.reference_name)
 	default_quality_inspection_warehouse, rejection_warehouse = frappe.db.get_value(
 		"Company", ref_doc.company, ['default_quality_inspection_warehouse', 'rejection_warehouse'])
 	
@@ -76,37 +82,58 @@ def material_transfer(self, ref_doc):
 	se.purpose = "Material Transfer"
 	se.stock_entry_type = "Material Transfer"
 	se.company = ref_doc.company
-	se.update({
-		"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
-		"from_warehouse": default_quality_inspection_warehouse
-	})
+	if self.reference_type == "Stock Entry":
+		se.update({
+			"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+			"from_warehouse": default_quality_inspection_warehouse
+		})
+	elif self.reference_type == "Purchase Receipt":	
+		se.update({
+			"to_warehouse": ref_doc.set_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+			"from_warehouse": default_quality_inspection_warehouse
+			})
 	for row in ref_doc.items:
-		if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
+		if self.reference_type == "Stock Entry":
+			if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
+				se.append("items", {
+					'item_code': row.item_code,
+					'quality_inspection': self.name,
+					's_warehouse': default_quality_inspection_warehouse,
+					't_warehouse': ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+					'qty': row.qty,
+					'batch_no': row.batch_no,
+					'basic_rate': row.basic_rate,  # Stock Entry uses basic_rate
+					'lot_no': row.lot_no,
+					'ar_no': row.ar_no,
+					'use_serial_batch_fields': 1,
+				})
+		elif self.reference_type == "Purchase Receipt":
 			se.append("items", {
 				'item_code': row.item_code,
 				'quality_inspection': self.name,
 				's_warehouse': default_quality_inspection_warehouse,
-				't_warehouse': ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+				't_warehouse': self.warehouse if self.workflow_state == "Approved" else rejection_warehouse,
 				'qty': row.qty,
 				'batch_no': row.batch_no,
-				'basic_rate': row.basic_rate,
+				'basic_rate': row.rate,  # Replace basic_rate with rate for Purchase Receipt
 				'lot_no': row.lot_no,
-				'ar_no':row.ar_no,
-				'use_serial_batch_fields':1,
+				'ar_no': row.ar_no,
+				'use_serial_batch_fields': 1,
 			})
 		elif row.t_warehouse and row.item_code == self.item_code and row.quality_inspection_required_for_scrap and row.is_scrap_item:
 			se.append("items", {
 				'item_code': row.item_code,
 				'quality_inspection': self.name,
 				's_warehouse': default_quality_inspection_warehouse,
-				't_warehouse': frappe.db.get_value("Work Order",ref_doc.work_order,"scrap_warehouse") if self.workflow_state == "Approved" else rejection_warehouse,
+				't_warehouse': frappe.db.get_value("Work Order", ref_doc.work_order, "scrap_warehouse") if self.workflow_state == "Approved" else rejection_warehouse,
 				'qty': row.qty,
 				'batch_no': row.batch_no,
-				'basic_rate': row.basic_rate,
+				'basic_rate': row.basic_rate if hasattr(row, 'basic_rate') else row.rate,  # Fallback for basic_rate
 				'lot_no': row.lot_no,
-				'ar_no':row.ar_no,
-				'use_serial_batch_fields':1,
+				'ar_no': row.ar_no,
+				'use_serial_batch_fields': 1,
 			})
+
 	se.save()
 	se.submit()
 	url = get_url_to_form("Stock Entry", se.name)

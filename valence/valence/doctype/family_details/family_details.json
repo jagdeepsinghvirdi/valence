@@ -1,0 +1,60 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-01-25 17:08:02.953186",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_dsss",
+  "name_of_member",
+  "relation",
+  "date_of_birth",
+  "occupation",
+  "dependent"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_dsss",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "name_of_member",
+   "fieldtype": "Data",
+   "label": "Name Of Member"
+  },
+  {
+   "fieldname": "relation",
+   "fieldtype": "Data",
+   "label": "Relation"
+  },
+  {
+   "fieldname": "date_of_birth",
+   "fieldtype": "Date",
+   "label": "Date of Birth"
+  },
+  {
+   "fieldname": "occupation",
+   "fieldtype": "Data",
+   "label": "Occupation"
+  },
+  {
+   "fieldname": "dependent",
+   "fieldtype": "Select",
+   "label": "Dependent",
+   "options": "\nYes\nNo"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-01-25 17:16:10.256299",
+ "modified_by": "Administrator",
+ "module": "Valence",
+ "name": "Family Details",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

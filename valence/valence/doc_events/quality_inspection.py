@@ -112,7 +112,7 @@ def material_transfer(self, ref_doc):
 				'item_code': row.item_code,
 				'quality_inspection': self.name,
 				's_warehouse': default_quality_inspection_warehouse,
-				't_warehouse': self.warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+				't_warehouse': self.warehouse,
 				'qty': row.qty,
 				'batch_no': row.batch_no,
 				'basic_rate': row.rate,  # Replace basic_rate with rate for Purchase Receipt

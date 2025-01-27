@@ -1,5 +1,6 @@
 import frappe
 from frappe.utils import add_months, get_last_day, nowdate,add_days,formatdate,get_url_to_form
+from frappe.utils import flt, cint, getdate
 
 def on_submit(self, method):
 	if self.reference_type:
@@ -113,7 +114,7 @@ def material_transfer(self, ref_doc):
 				'quality_inspection': self.name,
 				's_warehouse': default_quality_inspection_warehouse,
 				't_warehouse': self.warehouse,
-				'qty': row.qty,
+				'qty': flt(row.qty) - flt(self.sample_size),
 				'batch_no': row.batch_no,
 				'basic_rate': row.rate,  # Replace basic_rate with rate for Purchase Receipt
 				'lot_no': row.lot_no,

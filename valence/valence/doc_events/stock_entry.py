@@ -94,6 +94,7 @@ def make_quality_inspection(se_doc,item):
 		"reference_type": se_doc.doctype,
 		"reference_name": se_doc.name,
 		"item_code": item.item_code,
+		"sample_size": item.qty,
 		"description": item.description,
 		"batch_no": item.batch_no,
 		"lot_no": item.lot_no,

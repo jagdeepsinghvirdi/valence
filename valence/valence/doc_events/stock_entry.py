@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+import frappe.printing
 
 def on_submit(self, method):
 	if self.work_order and self.stock_entry_type in [ "Manufacture","Material Transfer for Manufacture"]:
@@ -71,6 +72,18 @@ def validate_manufacture_entry(self,method):
 			production_item=frappe.db.get_value("BOM",self.bom_no,"item")
 			for each in self.items:
 				if each.item_name == production_item or each.item_code == production_item or (each.quality_inspection_required_for_scrap and each.is_scrap_item):
+					if not each.get('quality_inspection'):
+						each.quality_inspection = make_quality_inspection(self,each)
+						created_quality_inspections.append(each.quality_inspection)
+					if self.company:
+						default_quality_inspection_warehouse=frappe.db.get_value("Company",self.company,"default_quality_inspection_warehouse")
+						if default_quality_inspection_warehouse and default_quality_inspection_warehouse != each.get('t_warehouse'):
+							each.t_warehouse = default_quality_inspection_warehouse
+	elif self.stock_entry_type == "Repack":
+		# production_item=frappe.db.get_value("BOM",self.bom_no,"item")
+		for each in self.items:
+			if self.custom_quality_inspection_for_bland:
+				if each.is_finished_item and each.t_warehouse:
 					if not each.get('quality_inspection'):
 						each.quality_inspection = make_quality_inspection(self,each)
 						created_quality_inspections.append(each.quality_inspection)

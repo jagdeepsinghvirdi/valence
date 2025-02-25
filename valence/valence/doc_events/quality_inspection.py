@@ -66,8 +66,11 @@ def transfer_material_from_quality_inspection_warehouse(self,method):
 		if self.reference_type == "Stock Entry":
 			if doc.stock_entry_type == "Manufacture":
 				material_transfer_stock_entry(self, doc)
+			elif doc.stock_entry_type == "Repack":
+				repack_stock_entry_type(self, doc)
 		elif self.reference_type == "Purchase Receipt":
 			material_transfer(self,doc)
+
 
 def material_transfer(self, ref_doc):
 	if self.reference_type == "Purchase Receipt":
@@ -161,4 +164,42 @@ def material_transfer_stock_entry(self, ref_doc):
 	url = get_url_to_form("Stock Entry", se.name)
 	self.db_set("stock_entry",se.name)
 	frappe.msgprint("New Stock Entry - <a href='{url}'>{doc}</a> created for Material Transfer".format(
+		url=url, doc=frappe.bold(se.name)))
+
+def repack_stock_entry_type(self, ref_doc):
+	if self.reference_type == "Stock Entry":
+		se_doc = frappe.get_doc("Stock Entry",self.reference_name)
+	default_quality_inspection_warehouse, rejection_warehouse = frappe.db.get_value(
+		"Company", ref_doc.company, ['default_quality_inspection_warehouse', 'rejection_warehouse'])
+	se = frappe.new_doc("Stock Entry")
+	se.fg_completed_qty = 0
+	se.posting_date = self.report_date
+	se.purpose = "Material Transfer"
+	se.stock_entry_type = "Material Transfer"
+	se.company = ref_doc.company
+	if self.reference_type == "Stock Entry":
+		se.update({
+			"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+			"from_warehouse": default_quality_inspection_warehouse
+		})
+	for row in ref_doc.items:
+		if self.reference_type == "Stock Entry":
+			if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
+				se.append("items", {
+					'item_code': row.item_code,
+					'quality_inspection': self.name,
+					's_warehouse': default_quality_inspection_warehouse,
+					't_warehouse': self.warehouse,
+					'qty': flt(row.qty) - flt(self.sample_size),
+					'batch_no': row.batch_no,
+					'basic_rate': row.basic_rate, 
+					'lot_no': row.lot_no,
+					'ar_no': row.ar_no,
+					'use_serial_batch_fields': 1,
+				})
+	se.save()
+	se.submit()
+	url = get_url_to_form("Stock Entry", se.name)
+	self.db_set("stock_entry",se.name)
+	frappe.msgprint("New Stock Entry - <a href='{url}'>{doc}</a> created for Repack".format(
 		url=url, doc=frappe.bold(se.name)))

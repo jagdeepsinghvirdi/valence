@@ -33,7 +33,7 @@ def make_quality_inspection(se_doc,item):
 		"batch_no": item.batch_no,
 		"lot_no": item.lot_no,
 		"ar_no":item.ar_no,
-		"sample_size": item.qty
+		"sample_size": item.stock_qty
 	})
 	doc.flags.ignore_mandatory=True
 	doc.flags.ignore_permissions=True

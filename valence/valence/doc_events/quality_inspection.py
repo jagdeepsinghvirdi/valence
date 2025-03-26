@@ -99,7 +99,7 @@ def material_transfer(self, ref_doc):
 					'quality_inspection': self.name,
 					's_warehouse': default_quality_inspection_warehouse,
 					't_warehouse': self.warehouse,
-					'qty': flt(row.qty) - flt(self.sample_size),
+					'qty': flt(row.stock_qty) - flt(self.sample_size),
 					'batch_no': row.batch_no,
 					'basic_rate': row.rate,  # Replace basic_rate with rate for Purchase Receipt
 					'lot_no': row.lot_no,	

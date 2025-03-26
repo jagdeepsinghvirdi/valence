@@ -17,7 +17,7 @@ def make_quality_inspections(doctype, docname, items):
 				).format(
 					item_name=item.get("item_name"),
 					sample_size=item.get("sample_size"),
-					accepted_quantity=item.get("qty"),
+					accepted_quantity=item.get("stock_qty"),
 				)
 			)
 

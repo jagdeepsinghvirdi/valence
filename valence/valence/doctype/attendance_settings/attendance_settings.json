@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-04-17 14:19:56.309236",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_fptb",
+  "use_late_coming_rules",
+  "short_leave_logic",
+  "short_leave_in_month"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_fptb",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "short_leave_logic",
+   "fieldtype": "Table",
+   "label": "Short Leave Logic",
+   "options": "Short Leave Logic"
+  },
+  {
+   "fieldname": "short_leave_in_month",
+   "fieldtype": "Int",
+   "label": "Short Leave In month"
+  },
+  {
+   "default": "0",
+   "description": "If checked, apply late coming rules (Shift Management). Otherwise, use standard attendance logic.",
+   "fieldname": "use_late_coming_rules",
+   "fieldtype": "Check",
+   "label": "Use Late Coming Rules"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-04-21 15:33:15.670995",
+ "modified_by": "Administrator",
+ "module": "Valence",
+ "name": "Attendance Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -49,11 +49,14 @@ doctype_js = {"Work Order" : "public/js/work_order.js",
 			"Sales Invoice":"public/js/sales_invoice.js",
 			"Delivery Note":"public/js/delivery_note.js",
 			"Stock Entry":"public/js/stock_entry.js",
+            "Attendance":"public/js/attendance.js",
 			
 }
-doctype_list_js = {"Batch":"public/js/batch_list.js",}
+doctype_list_js = {"Batch":"public/js/batch_list.js",
+                   "Attendance":"public/js/attendance_list.js",}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
+doctype_calendar_js = {"Shift Assignment" : "public/js/shift_assignment_calendar.js"}
 
 # Svg Icons
 # ------------------
@@ -146,6 +149,7 @@ override_doctype_class = {
 	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
 	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
+    "Attendance":"valence.valence.override.attendance.Attendance"
 }
 
 # Document Events
@@ -189,6 +193,13 @@ doc_events = {
       "before_insert": "valence.valence.doc_events.workflow_state_change.before_insert",
       "before_validate": "valence.valence.doc_events.workflow_state_change.before_validate",
   },
+  "Attendance":{
+      "validate":"valence.valence.doc_events.attendance.set_status",
+      "after_insert":"valence.valence.doc_events.attendance.set_short_leave_count",
+      "on_update_after_submit": "valence.valence.doc_events.attendance.set_short_leave_count"
+    #   "on_cancel": "valence.valence.doc_events.attendance.cleanup_related_docs",
+    #   "on_trash": "valence.valence.doc_events.attendance.cleanup_related_docs"      
+  }
 
 }
 
@@ -196,7 +207,7 @@ from erpnext.stock.serial_batch_bundle import SerialBatchCreation
 from valence.valence.monkey_patch.serial_batch_bundle import create_batch
 SerialBatchCreation.create_batch = create_batch
 # Scheduled Tasks
-# ---------------
+# --------------
 
 scheduler_events = {
 	"all":[
@@ -204,13 +215,15 @@ scheduler_events = {
 	],
     "cron": {
         "0 0 * * *": [
-            "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches"
-        ]
+            "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches",
+            "valence.valence.doc_events.attendance.process_attendance_offdays"
+        ],
     }
 }
 
 fixtures = [
     {"dt": "Custom Field", "filters": [["module", "in", ["Valence"]]]},
+    {"dt": "Property Setter", "filters": [["module", "in", ["Valence"]]]}
 ]
 # Testing
 # -------

@@ -7,11 +7,11 @@
   "doctype_or_field": "DocField",
   "field_name": "status",
   "is_system_generated": 0,
-  "modified": "2025-04-25 15:53:06.442127",
+  "modified": "2025-04-28 15:13:07.399340",
   "module": "Valence",
   "name": "Attendance-status-options",
   "property": "options",
-  "property_type": null,
+  "property_type": "Small Text",
   "row_name": null,
   "value": "\nPresent\nAbsent\nIn Mispunch\nOut Mispunch\nNo punch\nOn Leave\nHalf Day\nWork From Home\nPresent With Short Leave\nHoliday\nWeekly Off"
  },

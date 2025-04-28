@@ -3,15 +3,23 @@ from frappe.utils import getdate, nowdate, add_days, get_first_day, get_last_day
 from datetime import datetime, timedelta
 
 def set_status(self, method):
-    if not self.in_time and not self.out_time:        
-        self.status = "No punch"
+    if not self.in_time and not self.out_time: 
+        
+        from valence.api import get_offday_status     
+        if not self.in_time and not self.out_time:        
+            att_status = get_offday_status(self.employee,self.attendance_date,self.name)
+            if att_status:
+                self.db_set('status',att_status)       
+            else:
+                self.status = "No punch"
     elif not self.in_time:
         self.status = "In Mispunch"
     elif not self.out_time:
         self.status = "Out Mispunch"
 
 def set_short_leave_count(self, method):
-        # Check if this is being called after submission
+
+    # Check if this is being called after submission
     is_after_submit = method == "on_update_after_submit"
     
     # Check if late coming rules should be applied
@@ -50,8 +58,13 @@ def set_short_leave_count(self, method):
     
     # Get shift times
     shift_start_time = frappe.db.get_value("Shift Type", self.shift, 'start_time') 
-    shift_end_time = frappe.db.get_value("Shift Type", self.shift, 'end_time')
+    check_in_before_shift_start_time = frappe.db.get_value("Shift Type", self.shift, 'begin_check_in_before_shift_start_time') 
+    shift_start_time = shift_start_time +timedelta(minutes=check_in_before_shift_start_time)
 
+    shift_end_time = frappe.db.get_value("Shift Type", self.shift, 'end_time')
+    check_out_after_shift_end_time = frappe.db.get_value("Shift Type", self.shift, 'allow_check_out_after_shift_end_time') 
+    shift_end_time = shift_end_time +timedelta(minutes=check_out_after_shift_end_time)
+    
     in_time_diff = None
     out_time_diff = None
     deduction_applied = False
@@ -157,7 +170,7 @@ def set_short_leave_count(self, method):
                 self.custom_short_leave_count = 0
                 
                 if is_after_submit:
-                    # frappe.throw("Check we are here or not....................")
+                    
                     self.db_set('status','Half Day')
                     self.db_set('custom_short_leave_count',self.custom_short_leave_count)
                     

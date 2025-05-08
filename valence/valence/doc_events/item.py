@@ -10,3 +10,7 @@ def validate(self,method):
 	else:
 		prefix = item_group_prefixes[self.item_group]
 		self.abbr = prefix
+
+	if self.custom_is_final_stage:
+		if self.custom_item_stage <= 0 :
+			frappe.throw("Item Stage cannot be 0 or less than 0")

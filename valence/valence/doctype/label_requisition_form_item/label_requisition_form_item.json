@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-04-28 11:33:46.498175",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "drum_no",
+  "net_weight_kg",
+  "tare_weight_kg",
+  "gross_weight_kg",
+  "no_of_labels_required",
+  "observed_weight_kg",
+  "container_condition",
+  "seal_no",
+  "seal_condition"
+ ],
+ "fields": [
+  {
+   "fieldname": "drum_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Drum No.",
+   "reqd": 1
+  },
+  {
+   "fieldname": "net_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Net Weight (Kg)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "tare_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Tare Weight (Kg)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "gross_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Gross Weight (Kg)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "no_of_labels_required",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "No. of Labels Required"
+  },
+  {
+   "fieldname": "observed_weight_kg",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Observed Weight (Kg)"
+  },
+  {
+   "fieldname": "container_condition",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Container Condition"
+  },
+  {
+   "fieldname": "seal_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Seal No."
+  },
+  {
+   "fieldname": "seal_condition",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Seal Condition"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-04-29 12:03:50.268020",
+ "modified_by": "Administrator",
+ "module": "Valence",
+ "name": "Label Requisition Form Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,256 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2025-04-28 11:11:16.919010",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_5k2c",
+  "date",
+  "production_item",
+  "item_name",
+  "production_b_no",
+  "batch_size_kgs",
+  "manufacturing_date",
+  "lot_no",
+  "column_break_yvu4",
+  "grade",
+  "released_b_no",
+  "released_qty_kgs",
+  "retestexpiry_date",
+  "batch_no",
+  "ar_no",
+  "no_of_packages",
+  "stock_entry_reference_name",
+  "section_break_pp9u",
+  "label_details",
+  "section_break_tdgo",
+  "column_break_bvkt",
+  "total_net_weight",
+  "column_break_4hva",
+  "total_gross_weight",
+  "section_break_wznd",
+  "remarks_production",
+  "inspected_by",
+  "column_break_h9bs",
+  "remarks_qa",
+  "amended_from",
+  "naming_series"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_5k2c",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date"
+  },
+  {
+   "fieldname": "production_b_no",
+   "fieldtype": "Data",
+   "label": "Production B. No."
+  },
+  {
+   "fetch_from": "batch_no.batch_qty",
+   "fieldname": "batch_size_kgs",
+   "fieldtype": "Float",
+   "label": "Batch Size (Kgs)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_yvu4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "grade",
+   "fieldtype": "Data",
+   "label": "Grade"
+  },
+  {
+   "fieldname": "released_b_no",
+   "fieldtype": "Data",
+   "label": "Released B. No."
+  },
+  {
+   "fieldname": "released_qty_kgs",
+   "fieldtype": "Float",
+   "label": "Released Qty. (Kgs)"
+  },
+  {
+   "fieldname": "label_details",
+   "fieldtype": "Table",
+   "label": "Label Details",
+   "options": "Label Requisition Form Item"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Label Requisition Form",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "section_break_pp9u",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "section_break_tdgo",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_bvkt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_net_weight",
+   "fieldtype": "Float",
+   "label": "Total Net Weight\t",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_gross_weight",
+   "fieldtype": "Float",
+   "label": "Total Gross Weight\t",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_4hva",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_wznd",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "remarks_production",
+   "fieldtype": "Small Text",
+   "label": "Remarks Production"
+  },
+  {
+   "fieldname": "column_break_h9bs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "remarks_qa",
+   "fieldtype": "Small Text",
+   "label": "Remarks QA"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "LRF-",
+   "read_only": 1
+  },
+  {
+   "fieldname": "production_item",
+   "fieldtype": "Link",
+   "label": "Production Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "batch_no.manufacturing_date",
+   "fieldname": "manufacturing_date",
+   "fieldtype": "Date",
+   "label": "Manufacturing Date",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "batch_no.retest_date",
+   "fieldname": "retestexpiry_date",
+   "fieldtype": "Date",
+   "label": "Retest/Expiry Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Batch No",
+   "options": "Batch",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "batch_no.lot_no",
+   "fieldname": "lot_no",
+   "fieldtype": "Data",
+   "label": "Lot No",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "batch_no.ar_no",
+   "fetch_if_empty": 1,
+   "fieldname": "ar_no",
+   "fieldtype": "Data",
+   "label": "AR No.",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "batch_no.no_of_packages",
+   "fieldname": "no_of_packages",
+   "fieldtype": "Data",
+   "label": "No of Containers",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "production_item.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name"
+  },
+  {
+   "fieldname": "inspected_by",
+   "fieldtype": "Link",
+   "label": "Inspected By\t",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "stock_entry_reference_name",
+   "fieldtype": "Link",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "label": "Stock Entry Reference Name",
+   "options": "Stock Entry",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-05-01 14:46:18.830015",
+ "modified_by": "Administrator",
+ "module": "Valence",
+ "name": "Label Requisition Form",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -115,10 +115,11 @@ def material_transfer(self, ref_doc):
 
 
 def material_transfer_stock_entry(self, ref_doc):
+	
 	if self.reference_type == "Stock Entry":
 		se_doc = frappe.get_doc("Stock Entry",self.reference_name)
-	default_quality_inspection_warehouse, rejection_warehouse = frappe.db.get_value(
-		"Company", ref_doc.company, ['default_quality_inspection_warehouse', 'rejection_warehouse'])
+	default_quality_inspection_warehouse, default_quality_analysis_warehouse, rejection_warehouse = frappe.db.get_value(
+		"Company", ref_doc.company, ['default_quality_inspection_warehouse', 'custom_default_quality_analysis_warehouse','rejection_warehouse'])
 	se = frappe.new_doc("Stock Entry")
 	se.fg_completed_qty = 0
 	se.posting_date = self.report_date
@@ -126,31 +127,56 @@ def material_transfer_stock_entry(self, ref_doc):
 	se.stock_entry_type = "Material Transfer"
 	se.company = ref_doc.company
 	if self.reference_type == "Stock Entry":
+		for row in ref_doc.items:
+			if row.item_code == self.item_code:
+				if row.is_finished_item:
+					if self.custom_lrf_reference_name:
+						main_from_warehouse = default_quality_analysis_warehouse
+					else:
+						main_from_warehouse = default_quality_inspection_warehouse
+				elif row.is_scrap_item and row.quality_inspection_required_for_scrap:
+					main_from_warehouse = default_quality_inspection_warehouse
+				break
 		se.update({
-			"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
-			"from_warehouse": default_quality_inspection_warehouse
+			"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+			"from_warehouse": main_from_warehouse
 		})
 	for row in ref_doc.items:
 		if self.reference_type == "Stock Entry":
 			if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
-				se.append("items", {
+				if self.custom_lrf_reference_name:
+					ref_lrf_sample_size = frappe.db.get_value("Label Requisition Form",self.custom_lrf_reference_name,'custom_sample_size')
+					se.append("items", {
+						'item_code': row.item_code,
+						'quality_inspection': self.name,
+						's_warehouse': default_quality_analysis_warehouse,
+						't_warehouse': ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+						'qty': flt(row.qty) - flt(ref_lrf_sample_size),
+						'batch_no': row.batch_no,
+						'basic_rate': row.basic_rate,  # Stock Entry uses basic_rate
+						'lot_no': row.lot_no,
+						'ar_no': row.ar_no,
+						'use_serial_batch_fields': 1,
+					})
+				else:
+					se.append("items", {
 					'item_code': row.item_code,
 					'quality_inspection': self.name,
 					's_warehouse': default_quality_inspection_warehouse,
-					't_warehouse': ref_doc.to_warehouse if self.workflow_state == "Approved" else rejection_warehouse,
+					't_warehouse':  ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
 					'qty': flt(row.qty) - flt(self.sample_size),
 					'batch_no': row.batch_no,
-					'basic_rate': row.basic_rate,  # Stock Entry uses basic_rate
+					'basic_rate': row.basic_rate if hasattr(row, 'basic_rate') else row.rate,  # Fallback for basic_rate
 					'lot_no': row.lot_no,
 					'ar_no': row.ar_no,
 					'use_serial_batch_fields': 1,
-				})
+				})			
 			elif self.reference_type == "Stock Entry" and row.t_warehouse and row.item_code == self.item_code and row.quality_inspection_required_for_scrap and row.is_scrap_item:
 				se.append("items", {
 					'item_code': row.item_code,
 					'quality_inspection': self.name,
 					's_warehouse': default_quality_inspection_warehouse,
-					't_warehouse': frappe.db.get_value("Work Order", ref_doc.work_order, "scrap_warehouse") if self.workflow_state == "Approved" else rejection_warehouse,
+					't_warehouse': frappe.db.get_value("Work Order", ref_doc.work_order, "scrap_warehouse") if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
 					'qty': flt(row.qty) - flt(self.sample_size),
 					'batch_no': row.batch_no,
 					'basic_rate': row.basic_rate if hasattr(row, 'basic_rate') else row.rate,  # Fallback for basic_rate

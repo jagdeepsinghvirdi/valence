@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 
 def set_status(self, method):
     if not self.in_time and not self.out_time: 
-        
         from valence.api import get_offday_status     
         if not self.in_time and not self.out_time:        
             att_status = get_offday_status(self.employee,self.attendance_date,self.name)
@@ -16,11 +15,83 @@ def set_status(self, method):
         self.status = "In Mispunch"
     elif not self.out_time:
         self.status = "Out Mispunch"
+    elif self.in_time and self.out_time:
+        
+        FMT = "%Y-%m-%d %H:%M:%S"
+
+        if isinstance(self.in_time, str):
+            in_time = datetime.strptime(self.in_time, FMT)
+        else:
+            in_time = self.in_time
+
+        if isinstance(self.out_time, str):
+            out_time = datetime.strptime(self.out_time, FMT)
+        else:
+            out_time = self.out_time
+
+        # Get total seconds worked
+        duration_seconds = (out_time - in_time).total_seconds()
+
+        # Convert to decimal hours
+        hours = round(duration_seconds / 3600, 1)  # One digit after point
+        if not self.working_hours:
+            self.db_set('working_hours',hours)
+
+        
+        # Get shift thresholds
+        shift = frappe.get_doc("Shift Type", self.shift)
+        half_day_threshold = shift.working_hours_threshold_for_half_day or 0
+        absent_threshold = shift.working_hours_threshold_for_absent or 0
+
+        # Decide status based on thresholds
+        if hours < absent_threshold:
+            self.db_set('status', 'Absent')
+        elif hours < half_day_threshold:
+            self.db_set('status', 'Half Day')
+        else:
+            self.db_set('status', 'Present')
+
 
 def set_short_leave_count(self, method):
 
-    # Check if this is being called after submission
-    is_after_submit = method == "on_update_after_submit"
+    # Consider "after submit" logic if doc is submitted
+    is_after_submit = self.docstatus == 1
+
+    #if is_after_submit & working hours not set
+    if is_after_submit and not self.working_hours:
+        if self.in_time and self.out_time:
+            FMT = "%Y-%m-%d %H:%M:%S"
+
+            if isinstance(self.in_time, str):
+                in_time = datetime.strptime(self.in_time, FMT)
+            else:
+                in_time = self.in_time
+
+            if isinstance(self.out_time, str):
+                out_time = datetime.strptime(self.out_time, FMT)
+            else:
+                out_time = self.out_time
+
+            # Get total seconds worked
+            duration_seconds = (out_time - in_time).total_seconds()
+
+            # Convert to decimal hours
+            hours = round(duration_seconds / 3600, 1)  # One digit after point
+            
+            self.db_set('working_hours',hours)
+
+            # Get shift thresholds
+            shift = frappe.get_doc("Shift Type", self.shift)
+            half_day_threshold = shift.working_hours_threshold_for_half_day or 0
+            absent_threshold = shift.working_hours_threshold_for_absent or 0
+
+            # Decide status based on thresholds
+            if hours < absent_threshold:
+                self.db_set('status', 'Absent')
+            elif hours < half_day_threshold:
+                self.db_set('status', 'Half Day')
+            else:
+                self.db_set('status', 'Present')
     
     # Check if late coming rules should be applied
     use_late_coming_rules = frappe.db.get_single_value("Attendance Settings", "use_late_coming_rules")
@@ -45,47 +116,64 @@ def set_short_leave_count(self, method):
                                fields=['custom_short_leave_count','name'], 
                                order_by='modified desc', 
                                limit_page_length=1)
-        # frappe.throw(str(previous_attendance))
+        
         if previous_attendance and len(previous_attendance) > 0:
             self.db_set("custom_short_leave_count", previous_attendance[0].get('custom_short_leave_count'))
+            
             
         else:
             # If no previous record found, use the default value
             self.db_set("custom_short_leave_count",frappe.db.get_single_value("Attendance Settings", 'short_leave_in_month'))
+    
+    # if short leave count becomes 0 then return no next steps will be followed
+    if self.custom_short_leave_count <= 0:
+        return
     
     # Store the current short leave count after initial assignment
     current_short_leave_count = self.custom_short_leave_count
     
     # Get shift times
     shift_start_time = frappe.db.get_value("Shift Type", self.shift, 'start_time') 
-    check_in_before_shift_start_time = frappe.db.get_value("Shift Type", self.shift, 'begin_check_in_before_shift_start_time') 
-    shift_start_time = shift_start_time +timedelta(minutes=check_in_before_shift_start_time)
+    # check_in_before_shift_start_time = frappe.db.get_value("Shift Type", self.shift, 'begin_check_in_before_shift_start_time') 
+    # shift_start_time = shift_start_time +timedelta(minutes=check_in_before_shift_start_time)
 
     shift_end_time = frappe.db.get_value("Shift Type", self.shift, 'end_time')
-    check_out_after_shift_end_time = frappe.db.get_value("Shift Type", self.shift, 'allow_check_out_after_shift_end_time') 
-    shift_end_time = shift_end_time +timedelta(minutes=check_out_after_shift_end_time)
+    # check_out_after_shift_end_time = frappe.db.get_value("Shift Type", self.shift, 'allow_check_out_after_shift_end_time') 
+    # shift_end_time = shift_end_time +timedelta(minutes=check_out_after_shift_end_time)
     
     in_time_diff = None
     out_time_diff = None
     deduction_applied = False
-
+    
     # Convert in_time to get timedelta
     if self.in_time:
         if isinstance(self.in_time, str):
             in_time = datetime.strptime(self.in_time, "%Y-%m-%d %H:%M:%S")
+            
         else:
             in_time = self.in_time
         in_time_timedelta = timedelta(hours=in_time.hour, minutes=in_time.minute, seconds=in_time.second)
         
         # Convert shift_start_time to timedelta if it's not already
         if not isinstance(shift_start_time, timedelta):
+            
             shift_start_hours, shift_start_minutes, shift_start_seconds = shift_start_time.hour, shift_start_time.minute, shift_start_time.second
             shift_start_timedelta = timedelta(hours=shift_start_hours, minutes=shift_start_minutes, seconds=shift_start_seconds)
         else:
-            shift_start_timedelta = shift_start_time
             
-        in_time_diff = in_time_timedelta - shift_start_timedelta
+            shift_start_timedelta = shift_start_time
 
+        if in_time_timedelta > shift_start_timedelta:
+            in_time_diff = in_time_timedelta - shift_start_timedelta
+            # Subtract 30 minutes only if in_time_diff > 0
+            in_time_diff -= timedelta(minutes=30)
+
+            # Ensure result is not negative
+            if in_time_diff.total_seconds() < 0:
+                in_time_diff = timedelta(0)
+        else:
+            in_time_diff = timedelta(0)
+   
     # Convert out_time to get timedelta
     if self.out_time:
         if isinstance(self.out_time, str):
@@ -103,7 +191,7 @@ def set_short_leave_count(self, method):
             shift_end_timedelta = shift_end_time
             
         out_time_diff = shift_end_timedelta - out_time_timedelta
-
+    
     # Get short leave rules
     short_leave_list = frappe.db.sql(""" 
                                     select time_period_1, time_period_2, deduction_in_short_leave
@@ -117,15 +205,17 @@ def set_short_leave_count(self, method):
         
         # Check if either in_time or out_time falls within the short leave period
         if (in_time_diff and start <= in_time_diff <= end) or (out_time_diff and start <= out_time_diff <= end):
+            # frappe.throw(str(row['deduction_in_short_leave']))
             deduction = row["deduction_in_short_leave"]
             before_deduction = self.custom_short_leave_count
             self.custom_short_leave_count = self.custom_short_leave_count - deduction
             deduction_applied = True
             
             # Update the status directly in the database if after submission
-            if is_after_submit:
+            if is_after_submit and  self.custom_short_leave_count > 0 :
                 
                 self.db_set('status','Present With Short Leave')
+                
                 self.db_set('custom_short_leave_count',self.custom_short_leave_count)
                 
                 # # Check if this Attendance record exists and is submitted
@@ -172,8 +262,7 @@ def set_short_leave_count(self, method):
                 if is_after_submit:
                     
                     self.db_set('status','Half Day')
-                    self.db_set('custom_short_leave_count',self.custom_short_leave_count)
-                    
+                    self.db_set('custom_short_leave_count',self.custom_short_leave_count)                    
                 else:
                     self.status = "Half Day"
                     
@@ -183,9 +272,8 @@ def set_short_leave_count(self, method):
                 if is_after_submit:
                     
                     self.db_set('leave_type',leave_type)
-                    self.db_set('half_day_status',"Present")
-                    self.db_set('docstatus',0)
-                                        
+                    self.db_set('half_day_status',"Present")         
+                    self.db_set('docstatus',0)                               
                 else:
                     self.leave_type = leave_type
                     self.half_day_status = "Present"
@@ -212,6 +300,7 @@ def set_short_leave_count(self, method):
                     # Link the leave application to the attendance record
                     if is_after_submit:
                         self.db_set("leave_application", leave_application.name)
+                        self.db_set('docstatus',1)  
                     else:
                         self.leave_application = leave_application.name
 

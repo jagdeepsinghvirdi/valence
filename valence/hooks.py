@@ -149,7 +149,8 @@ override_doctype_class = {
 	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
 	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
-    "Attendance":"valence.valence.override.attendance.Attendance"
+    "Attendance":"valence.valence.override.attendance.Attendance",
+    "Shift Type":"valence.valence.override.shift_type.ShiftType"
 }
 
 # Document Events

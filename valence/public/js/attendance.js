@@ -33,6 +33,7 @@ frappe.ui.form.on('Attendance', {
                                     attendance: frm.doc.name
                                 },
                                 callback: function(r) {
+                                    console.log("checking for response",r.message)
                                     setTimeout(() => {
                                         frm.reload_doc().then(() => {
                                             if (

@@ -164,7 +164,7 @@ doc_events = {
 		"before_submit":"valence.valence.doc_events.quality_inspection.before_submit",
 	},
     "Stock Entry":{
-        "on_submit":"valence.valence.doc_events.stock_entry.on_submit",
+        "on_submit":["valence.valence.doc_events.stock_entry.on_submit","valence.valence.doc_events.stock_entry.set_lrf_batch_size"],
 		"before_submit":["valence.valence.doc_events.stock_entry.validate_manufacture_entry","valence.valence.doc_events.stock_entry.stock_entry_quality_inspection_validation"],
 		"on_cancel":"valence.valence.doc_events.stock_entry.on_cancel_manufacture_entry",
 		"validate":"valence.valence.doc_events.stock_entry.validate"

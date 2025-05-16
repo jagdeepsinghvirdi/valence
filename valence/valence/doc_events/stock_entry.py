@@ -3,6 +3,7 @@ from frappe import _
 # import frappe.printing
 
 def on_submit(self, method):
+	
 	if self.work_order and self.stock_entry_type in [ "Manufacture","Material Transfer for Manufacture"]:
 		user = self.owner
 		roles = frappe.get_roles(user)
@@ -63,7 +64,6 @@ def on_submit(self, method):
 				_("{0}<br><br>{1}")
 				.format(group_summary, item_table)
 			)
-		
 
 def validate_manufacture_entry(self,method):
 	
@@ -127,7 +127,6 @@ def validate_manufacture_entry(self,method):
 
 
 def make_quality_inspection(se_doc,item):
-		
 	production_item = frappe.db.get_value("Work Order",se_doc.work_order,"production_item")
 	get_batch_no = frappe.db.get_value("Work Order",se_doc.work_order,"batch_no")
 	is_final_stage = frappe.db.get_value("Item",production_item,"custom_is_final_stage")
@@ -139,6 +138,7 @@ def make_quality_inspection(se_doc,item):
 			"inspection_type": "Incoming",
 			"reference_type": se_doc.doctype,
 			"reference_name": se_doc.name,
+			"custom_entry_type": "LRF" if lrf_reference else "RFA",
 			'custom_lrf_reference_name': lrf_reference,
 			"item_code": item.item_code,
 			"sample_size": item.qty,
@@ -156,11 +156,18 @@ def make_quality_inspection(se_doc,item):
 
 	if (is_final_stage or se_doc.custom_is_item_intermediate_stage) and int(item_stage)>0:
 		if not item.quality_inspection_required_for_scrap and not item.is_scrap_item:
+			b_qty,b_mdate,b_lot,b_rdate,b_nocon = frappe.db.get_value("Batch",get_batch_no,['batch_qty','manufacturing_date','lot_no','retest_date','no_of_packages'])
 			# Create LRF Entry
 			lrf_doc = frappe.new_doc("Label Requisition Form")  # Replace "LRF" with actual DocType name if different
 			lrf_doc.update({
 				"production_item": production_item,            
-				"batch_no": get_batch_no,
+				"grade":'NA' if se_doc.custom_is_item_intermediate_stage else '',
+				"production_b_no": get_batch_no,
+				'batch_size_kgs':b_qty,
+				'manufacturing_date':b_mdate,
+				'lot_no': b_lot,
+				'retestexpiry_date':b_rdate,
+				'no_of_packages':b_nocon,
 				"stock_entry_reference_name": se_doc.name,
 				"inspected_by": se_doc.modified_by,
 			})
@@ -229,3 +236,7 @@ def validate(self,method):
 				row.use_serial_batch_fields = 1
 				row.batch_no = batch_no
 
+def set_lrf_batch_size(self,method):
+	lrf_reference_doc = frappe.get_doc("Label Requisition Form",{'stock_entry_reference_name':self.name})
+	get_batch_size = frappe.db.get_value("Batch",self.control_no,'batch_qty')
+	lrf_reference_doc.db_set('batch_size_kgs',get_batch_size)

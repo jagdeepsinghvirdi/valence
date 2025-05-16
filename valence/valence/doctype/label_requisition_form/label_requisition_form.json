@@ -9,7 +9,6 @@
   "section_break_5k2c",
   "date",
   "production_item",
-  "item_name",
   "production_b_no",
   "batch_size_kgs",
   "manufacturing_date",
@@ -19,8 +18,6 @@
   "released_b_no",
   "released_qty_kgs",
   "retestexpiry_date",
-  "batch_no",
-  "ar_no",
   "no_of_packages",
   "stock_entry_reference_name",
   "section_break_pp9u",
@@ -51,11 +48,15 @@
   },
   {
    "fieldname": "production_b_no",
-   "fieldtype": "Data",
-   "label": "Production B. No."
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Production B. No.",
+   "options": "Batch",
+   "reqd": 1
   },
   {
-   "fetch_from": "batch_no.batch_qty",
+   "fetch_from": "production_b_no.batch_qty",
+   "fetch_if_empty": 1,
    "fieldname": "batch_size_kgs",
    "fieldtype": "Float",
    "label": "Batch Size (Kgs)",
@@ -78,7 +79,8 @@
   {
    "fieldname": "released_qty_kgs",
    "fieldtype": "Float",
-   "label": "Released Qty. (Kgs)"
+   "label": "Released Qty. (Kgs)",
+   "read_only": 1
   },
   {
    "fieldname": "label_details",
@@ -158,54 +160,36 @@
    "reqd": 1
   },
   {
-   "fetch_from": "batch_no.manufacturing_date",
+   "fetch_from": "production_b_no.manufacturing_date",
+   "fetch_if_empty": 1,
    "fieldname": "manufacturing_date",
    "fieldtype": "Date",
    "label": "Manufacturing Date",
    "read_only": 1
   },
   {
-   "fetch_from": "batch_no.retest_date",
+   "fetch_from": "production_b_no.retest_date",
+   "fetch_if_empty": 1,
    "fieldname": "retestexpiry_date",
    "fieldtype": "Date",
    "label": "Retest/Expiry Date",
    "read_only": 1
   },
   {
-   "fieldname": "batch_no",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Batch No",
-   "options": "Batch",
-   "reqd": 1
-  },
-  {
-   "fetch_from": "batch_no.lot_no",
+   "fetch_from": "production_b_no.lot_no",
+   "fetch_if_empty": 1,
    "fieldname": "lot_no",
    "fieldtype": "Data",
    "label": "Lot No",
    "read_only": 1
   },
   {
-   "fetch_from": "batch_no.ar_no",
+   "fetch_from": "production_b_no.no_of_packages",
    "fetch_if_empty": 1,
-   "fieldname": "ar_no",
-   "fieldtype": "Data",
-   "label": "AR No.",
-   "read_only": 1
-  },
-  {
-   "fetch_from": "batch_no.no_of_packages",
    "fieldname": "no_of_packages",
    "fieldtype": "Data",
    "label": "No of Containers",
    "read_only": 1
-  },
-  {
-   "fetch_from": "production_item.item_name",
-   "fieldname": "item_name",
-   "fieldtype": "Data",
-   "label": "Item Name"
   },
   {
    "fieldname": "inspected_by",
@@ -228,7 +212,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-05-01 14:46:18.830015",
+ "modified": "2025-05-16 11:19:41.811070",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Label Requisition Form",

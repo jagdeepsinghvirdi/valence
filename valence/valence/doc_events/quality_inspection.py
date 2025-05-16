@@ -114,83 +114,131 @@ def material_transfer(self, ref_doc):
 		url=url, doc=frappe.bold(se.name)))
 
 
-def material_transfer_stock_entry(self, ref_doc):
+def material_transfer_stock_entry(self, ref_doc):	
 	
 	if self.reference_type == "Stock Entry":
 		se_doc = frappe.get_doc("Stock Entry",self.reference_name)
 	default_quality_inspection_warehouse, default_quality_analysis_warehouse, rejection_warehouse = frappe.db.get_value(
 		"Company", ref_doc.company, ['default_quality_inspection_warehouse', 'custom_default_quality_analysis_warehouse','rejection_warehouse'])
-	se = frappe.new_doc("Stock Entry")
-	se.fg_completed_qty = 0
-	se.posting_date = self.report_date
-	se.purpose = "Material Transfer"
-	se.stock_entry_type = "Material Transfer"
-	se.company = ref_doc.company
-	if self.reference_type == "Stock Entry":
-		for row in ref_doc.items:
-			if row.item_code == self.item_code:
-				if row.is_finished_item:
-					if self.custom_lrf_reference_name:
-						main_from_warehouse = default_quality_analysis_warehouse
-					else:
-						main_from_warehouse = default_quality_inspection_warehouse
-				elif row.is_scrap_item and row.quality_inspection_required_for_scrap:
-					main_from_warehouse = default_quality_inspection_warehouse
-				break
-		se.update({
-			"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
-			"from_warehouse": main_from_warehouse
+	
+	if self.custom_lrf_reference_name:
+		# First Manufacture Entry For Quality Analysis to Quality Inspection Warehouse
+		se1 = frappe.new_doc("Stock Entry")
+		se1.fg_completed_qty = 0
+		se1.posting_date = self.report_date
+		se1.purpose = "Material Transfer"
+		se1.stock_entry_type = "Material Transfer"
+		se1.company = ref_doc.company
+		se1.update({
+			"to_warehouse": default_quality_inspection_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+			"from_warehouse": default_quality_analysis_warehouse
 		})
-	for row in ref_doc.items:
-		if self.reference_type == "Stock Entry":
-			if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
-				if self.custom_lrf_reference_name:
-					ref_lrf_sample_size = frappe.db.get_value("Label Requisition Form",self.custom_lrf_reference_name,'custom_sample_size')
+		for row in ref_doc.items:
+			if self.reference_type == "Stock Entry":
+				if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
+					if self.custom_lrf_reference_name:
+						ref_lrf_sample_size = self.sample_size or frappe.db.get_value("Label Requisition Form",self.custom_lrf_reference_name,'custom_sample_size')
+						se1.append("items", {
+							'item_code': row.item_code,
+							'quality_inspection': self.name,
+							's_warehouse': default_quality_analysis_warehouse,
+							't_warehouse': default_quality_inspection_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+							'qty': flt(ref_lrf_sample_size),
+							'batch_no': row.batch_no,
+							'basic_rate': row.basic_rate,  # Stock Entry uses basic_rate
+							'lot_no': row.lot_no,
+							'ar_no': row.ar_no,
+							'use_serial_batch_fields': 1
+						})
+		se1.custom_quality_inspection_reference_ = self.name
+		se1.save()
+		se1.submit()
+		url = get_url_to_form("Stock Entry", se1.name)
+
+		frappe.msgprint("New Stock Entry - <a href='{url}'>{doc}</a> created for Material Transfer".format(
+			url=url, doc=frappe.bold(se1.name)))
+		
+		# Second  Manufacture Entry For Quality Inspection Warehouse to Target Warehouse
+		se2 = frappe.new_doc("Stock Entry")
+		se2.fg_completed_qty = 0
+		se2.posting_date = self.report_date
+		se2.purpose = "Material Transfer"
+		se2.stock_entry_type = "Material Transfer"
+		se2.company = ref_doc.company
+		se2.update({
+			"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+			"from_warehouse": default_quality_inspection_warehouse
+		})
+		for row in ref_doc.items:
+			if self.reference_type == "Stock Entry":
+				if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
+					if self.custom_lrf_reference_name:
+						ref_lrf_sample_size = self.sample_size or frappe.db.get_value("Label Requisition Form",self.custom_lrf_reference_name,'custom_sample_size')
+						se2.append("items", {
+							'item_code': row.item_code,
+							'quality_inspection': self.name,
+							's_warehouse': default_quality_analysis_warehouse,
+							't_warehouse': ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+							'qty': flt(row.qty) - flt(ref_lrf_sample_size),
+							'batch_no': row.batch_no,
+							'basic_rate': row.basic_rate,  # Stock Entry uses basic_rate
+							'lot_no': row.lot_no,
+							'ar_no': row.ar_no,
+							'use_serial_batch_fields': 1
+						})
+		se2.custom_quality_inspection_reference_ = self.name
+		se2.save()
+		se2.submit()
+		url = get_url_to_form("Stock Entry", se2.name)
+		frappe.msgprint("New Stock Entry - <a href='{url}'>{doc}</a> created for Material Transfer".format(
+			url=url, doc=frappe.bold(se2.name)))
+		
+	else:
+		se = frappe.new_doc("Stock Entry")
+		se.fg_completed_qty = 0
+		se.posting_date = self.report_date
+		se.purpose = "Material Transfer"
+		se.stock_entry_type = "Material Transfer"
+		se.company = ref_doc.company
+		se.update({
+				"to_warehouse": ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+				"from_warehouse": default_quality_inspection_warehouse
+		})
+		for row in ref_doc.items:
+			if self.reference_type == "Stock Entry":
+				if row.t_warehouse and row.is_finished_item and row.item_code == self.item_code:
 					se.append("items", {
 						'item_code': row.item_code,
 						'quality_inspection': self.name,
-						's_warehouse': default_quality_analysis_warehouse,
+						's_warehouse': default_quality_inspection_warehouse,
 						't_warehouse': ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
-						'qty': flt(row.qty) - flt(ref_lrf_sample_size),
+						'qty': flt(row.qty) - flt(self.sample_size),
 						'batch_no': row.batch_no,
 						'basic_rate': row.basic_rate,  # Stock Entry uses basic_rate
 						'lot_no': row.lot_no,
 						'ar_no': row.ar_no,
 						'use_serial_batch_fields': 1,
-					})
-				else:
+					})			
+				elif self.reference_type == "Stock Entry" and row.t_warehouse and row.item_code == self.item_code and row.quality_inspection_required_for_scrap and row.is_scrap_item:
 					se.append("items", {
-					'item_code': row.item_code,
-					'quality_inspection': self.name,
-					's_warehouse': default_quality_inspection_warehouse,
-					't_warehouse':  ref_doc.to_warehouse if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
-					'qty': flt(row.qty) - flt(self.sample_size),
-					'batch_no': row.batch_no,
-					'basic_rate': row.basic_rate if hasattr(row, 'basic_rate') else row.rate,  # Fallback for basic_rate
-					'lot_no': row.lot_no,
-					'ar_no': row.ar_no,
-					'use_serial_batch_fields': 1,
-				})			
-			elif self.reference_type == "Stock Entry" and row.t_warehouse and row.item_code == self.item_code and row.quality_inspection_required_for_scrap and row.is_scrap_item:
-				se.append("items", {
-					'item_code': row.item_code,
-					'quality_inspection': self.name,
-					's_warehouse': default_quality_inspection_warehouse,
-					't_warehouse': frappe.db.get_value("Work Order", ref_doc.work_order, "scrap_warehouse") if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
-					'qty': flt(row.qty) - flt(self.sample_size),
-					'batch_no': row.batch_no,
-					'basic_rate': row.basic_rate if hasattr(row, 'basic_rate') else row.rate,  # Fallback for basic_rate
-					'lot_no': row.lot_no,
-					'ar_no': row.ar_no,
-					'use_serial_batch_fields': 1,
-				})
+						'item_code': row.item_code,
+						'quality_inspection': self.name,
+						's_warehouse': default_quality_inspection_warehouse,
+						't_warehouse': frappe.db.get_value("Work Order", ref_doc.work_order, "scrap_warehouse") if self.workflow_state == "Approved" and self.status == "Accepted" else rejection_warehouse,
+						'qty': flt(row.qty) - flt(self.sample_size),
+						'batch_no': row.batch_no,
+						'basic_rate': row.basic_rate if hasattr(row, 'basic_rate') else row.rate,  # Fallback for basic_rate
+						'lot_no': row.lot_no,
+						'ar_no': row.ar_no,
+						'use_serial_batch_fields': 1,
+					})
 
-	se.save()
-	se.submit()
-	url = get_url_to_form("Stock Entry", se.name)
-	self.db_set("stock_entry",se.name)
-	frappe.msgprint("New Stock Entry - <a href='{url}'>{doc}</a> created for Material Transfer".format(
-		url=url, doc=frappe.bold(se.name)))
+		se.save()
+		se.submit()
+		url = get_url_to_form("Stock Entry", se.name)
+		self.db_set("stock_entry",se.name)
+		frappe.msgprint("New Stock Entry - <a href='{url}'>{doc}</a> created for Material Transfer".format(
+			url=url, doc=frappe.bold(se.name)))
 
 def repack_stock_entry_type(self, ref_doc):
 	if self.reference_type == "Stock Entry":

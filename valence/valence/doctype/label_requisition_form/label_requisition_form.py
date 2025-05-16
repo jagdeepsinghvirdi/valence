@@ -11,9 +11,17 @@ class LabelRequisitionForm(Document):
 	def on_submit(self):
 		if self.custom_sample_size <= 0:
 			frappe.throw("Sample size cannot be 0 or less than 0")
+
+		if self.released_qty_kgs != self.total_gross_weight:
+			frappe.throw(f"Released Quantity ({self.released_qty_kgs} kg) must be equal to Total Gross Weight ({self.total_gross_weight} kg). Please check the values.")
 				
 		# self.create_quality_inspection()
-		self.material_transfer_stock_entry()
+		# self.material_transfer_stock_entry()
+		self.update_sample_size()
+
+	def update_sample_size(self):
+		qi_name = frappe.get_doc("Quality Inspection",{'custom_lrf_reference_name':self.name})
+		qi_name.db_set('sample_size',self.custom_sample_size)
     
 	def create_quality_inspection(self):
 		# Create a new Quality Inspection document

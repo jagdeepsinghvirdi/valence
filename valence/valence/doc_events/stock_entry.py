@@ -238,5 +238,6 @@ def validate(self,method):
 
 def set_lrf_batch_size(self,method):
 	lrf_reference_doc = frappe.get_doc("Label Requisition Form",{'stock_entry_reference_name':self.name})
-	get_batch_size = frappe.db.get_value("Batch",self.control_no,'batch_qty')
-	lrf_reference_doc.db_set('batch_size_kgs',get_batch_size)
+	if lrf_reference_doc:
+		get_batch_size = frappe.db.get_value("Batch",self.control_no,'batch_qty')
+		lrf_reference_doc.db_set('batch_size_kgs',get_batch_size)

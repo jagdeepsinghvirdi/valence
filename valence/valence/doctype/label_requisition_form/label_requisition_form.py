@@ -22,7 +22,7 @@ class LabelRequisitionForm(Document):
 	def update_sample_size(self):
 		qi_name = frappe.get_doc("Quality Inspection",{'custom_lrf_reference_name':self.name})
 		qi_name.db_set('sample_size',self.custom_sample_size)
-    
+	
 	def create_quality_inspection(self):
 		# Create a new Quality Inspection document
 		

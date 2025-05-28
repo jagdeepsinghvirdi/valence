@@ -129,7 +129,7 @@ function render_dialog_with_visibility(frm, cdn, show) {
         const grid_form = row.grid_form;
         if (!grid_form) return;
 
-        ['custom_lrf_reference_name','custom_grade'].forEach(fieldname => {
+        ['custom_lrf_reference_name','custom_grade','custom_released_b_no'].forEach(fieldname => {
             const field = grid_form.fields_dict[fieldname];
             if (field) {
                 field.df.hidden = !show;

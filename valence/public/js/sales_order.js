@@ -1,32 +1,4 @@
-cur_frm.cscript.onload = function (frm) {
-    cur_frm.set_query("batch_no", "items", function (doc, cdt, cdn) {
-        let d = locals[cdt][cdn];
-        if (!d.item_code) {
-            frappe.throw(__("Please enter Item Code to get batch no"));
-        }
-        else {
-            if (d.item_group == "Finished Products"){
-                return {
-                    query: "valence.valence.override.whitelisted_method.query.get_batch_no",
-                    filters: {
-                        'item_code': d.item_code,
-                        'warehouse': d.warehouse,
-                    }
-                }
-            } else {
-                return {
-                    query: "valence.valence.override.whitelisted_method.query.get_batch_no",
-                    filters: {
-                        'item_code': d.item_code,
-                        'warehouse': d.warehouse
-                    }
-                }
-            }
-        }
-    });
-}
-
-frappe.ui.form.on('Sales Invoice Item', {
+frappe.ui.form.on('Sales Order Item', {
 
     item_code: function(frm, cdt, cdn) {
         const row = locals[cdt][cdn];
@@ -54,7 +26,7 @@ frappe.ui.form.on('Sales Invoice Item', {
     },
 
     custom_lrf_reference_name: function(frm, cdt, cdn) {       
-        console.log("Custom LRF Reference Name changed");
+
         const row = locals[cdt][cdn];
         if (!row.custom_lrf_reference_name) return;
 
@@ -65,14 +37,15 @@ frappe.ui.form.on('Sales Invoice Item', {
             },
              callback: function(r) {
                 if (r.message && Array.isArray(r.message)) {
-                    
+                    console.log("Server response:", r.message[0].batch_no);
+
                     const seal_nos = r.message.map(d => d.seal_no).filter(Boolean).join(', ');
                     const drum_nos = r.message.map(d => d.drum_no).filter(Boolean).join(', ');
                     const batch_no = r.message[0].batch_no;
 
-                    frappe.model.set_value(cdt, cdn, "seal_no", seal_nos);
-                    frappe.model.set_value(cdt, cdn, "pack_size", drum_nos);
-                    frappe.model.set_value(cdt, cdn, "batch_item", batch_no);
+                    frappe.model.set_value(cdt, cdn, "custom_sealno", seal_nos);
+                    frappe.model.set_value(cdt, cdn, "custom_pack", drum_nos);
+                    frappe.model.set_value(cdt, cdn, "custom_batch", batch_no);
 
                     if (batch_no) {
                         frappe.call({
@@ -84,8 +57,8 @@ frappe.ui.form.on('Sales Invoice Item', {
                             callback: function(res) {
                                 if (res.message) {
                                     const batch = res.message;
-                                    frappe.model.set_value(cdt, cdn, "mfg_date", batch.manufacturing_date || "");
-                                    frappe.model.set_value(cdt, cdn, "date_expiry", batch.retest_date || "");
+                                    frappe.model.set_value(cdt, cdn, "custom_mfg", batch.manufacturing_date || "");
+                                    frappe.model.set_value(cdt, cdn, "custom_retestexpiry", batch.retest_date || "");
                                 }
                             }
                         });
@@ -135,6 +108,3 @@ function render_dialog_with_visibility(frm, cdn, show) {
         });
     }, 1000);
 }
-
-
-

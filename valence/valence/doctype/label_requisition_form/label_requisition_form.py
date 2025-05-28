@@ -9,8 +9,8 @@ from frappe.utils import get_url_to_form,flt
 class LabelRequisitionForm(Document):
 
 	def on_submit(self):
-		if self.released_qty_kgs != self.total_gross_weight:
-			frappe.throw(f"Released Quantity ({self.released_qty_kgs} kg) must be equal to Total Gross Weight ({self.total_gross_weight} kg). Please check the values.")
+		if self.released_qty_kgs != self.total_net_weight:
+			frappe.throw(f"Released Quantity ({self.released_qty_kgs} kg) must be equal to Total Net Weight ({self.total_net_weight} kg). Please check the values.")
 				
 		# self.create_quality_inspection()
 		# self.material_transfer_stock_entry()

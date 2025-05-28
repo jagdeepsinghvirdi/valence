@@ -106,7 +106,8 @@ def get_offday_status(employee, attendance_date,attendance):
 def fetch_lrf_details(lrf_name):
     data = []
     get_batch_no = frappe.db.get_value("Label Requisition Form", lrf_name, "production_b_no")
-    data.append({"batch_no":get_batch_no})
+    released_batch_no = frappe.db.get_value("Label Requisition Form", lrf_name, "released_b_no")
+    data.append({"batch_no":get_batch_no, "released_batch_no":released_batch_no})
     
     try:
         child = frappe.get_all(

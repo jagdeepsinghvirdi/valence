@@ -20,6 +20,18 @@
   "retestexpiry_date",
   "no_of_packages",
   "stock_entry_reference_name",
+  "spec_section",
+  "ih",
+  "ar_no_ih",
+  "column_break_xd1l",
+  "ip",
+  "ar_no_ip",
+  "column_break_pzg5",
+  "usp",
+  "ar_no_usp",
+  "column_break_cgir",
+  "epbp",
+  "ar_no_epbp",
   "section_break_pp9u",
   "label_details",
   "section_break_tdgo",
@@ -79,8 +91,7 @@
   {
    "fieldname": "released_qty_kgs",
    "fieldtype": "Float",
-   "label": "Released Qty. (Kgs)",
-   "read_only": 1
+   "label": "Released Qty. (Kgs)"
   },
   {
    "fieldname": "label_details",
@@ -206,13 +217,79 @@
    "label": "Stock Entry Reference Name",
    "options": "Stock Entry",
    "read_only": 1
+  },
+  {
+   "fieldname": "spec_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Spec"
+  },
+  {
+   "default": "0",
+   "fieldname": "ih",
+   "fieldtype": "Check",
+   "label": "IH"
+  },
+  {
+   "depends_on": "eval: doc.ih ==1;",
+   "fieldname": "ar_no_ih",
+   "fieldtype": "Data",
+   "label": "AR No. IH"
+  },
+  {
+   "fieldname": "column_break_xd1l",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "ip",
+   "fieldtype": "Check",
+   "label": "IP"
+  },
+  {
+   "depends_on": "eval: doc.ip == 1;",
+   "fieldname": "ar_no_ip",
+   "fieldtype": "Data",
+   "label": "AR No. IP"
+  },
+  {
+   "fieldname": "column_break_pzg5",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "usp",
+   "fieldtype": "Check",
+   "label": "USP"
+  },
+  {
+   "depends_on": "eval: doc.usp == 1;",
+   "fieldname": "ar_no_usp",
+   "fieldtype": "Data",
+   "label": "AR No. USP"
+  },
+  {
+   "fieldname": "column_break_cgir",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "epbp",
+   "fieldtype": "Check",
+   "label": "EP/BP"
+  },
+  {
+   "depends_on": "eval: doc.epbp == 1;",
+   "fieldname": "ar_no_epbp",
+   "fieldtype": "Data",
+   "label": "AR No. EP/BP"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-05-16 11:19:41.811070",
+ "modified": "2025-05-28 15:54:29.755663",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Label Requisition Form",

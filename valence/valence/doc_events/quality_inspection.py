@@ -3,6 +3,7 @@ from frappe.utils import add_months, get_last_day, nowdate,add_days,formatdate,g
 from frappe.utils import flt, cint, getdate
 
 def on_submit(self, method):
+	
 	if self.reference_type:
 		ref_doctype = frappe.get_doc(self.reference_type, self.reference_name)
 		for row in ref_doctype.items:
@@ -26,12 +27,54 @@ def before_submit(self,method):
 		frappe.throw("AR No. is Mandatory Field")
 
 def before_save(self, method):
+	
 	if self.retest_month:
 		today = nowdate()  
 		new_date = add_months(today, int(self.retest_month))
 		retest_date = get_last_day(new_date)  
 		self.retest_date = retest_date
 
+	if self.custom_lrf_reference_name:
+		lrf_doc = frappe.get_doc("Label Requisition Form", self.custom_lrf_reference_name)
+		lrf_batch_size = lrf_doc.get("batch_size_kgs") 
+		lrf_doc.db_set("released_qty_kgs",lrf_batch_size - self.sample_size)
+
+		# Initialize list to collect selected grades
+		grades = []
+
+		if self.custom_ih:
+			grades.append("IH")
+
+		if self.custom_ip:
+			grades.append("IP")
+
+		if self.custom_usp:
+			grades.append("USP")
+
+		if self.custom_epbp:
+			grades.append("EP/BP")
+
+		# Join and set grade in LRF doc
+		if grades:
+			lrf_doc.db_set("grade", ", ".join(grades))
+
+	batch_doc = frappe.get_doc("Batch",self.batch_no)
+	if self.custom_ih:
+		batch_doc.db_set("ih",1)
+	if self.custom_ar_no_ih:
+		batch_doc.db_set("ar_no_ih",self.custom_ar_no_ih)
+	if self.custom_ip:
+		batch_doc.db_set("ip",1)
+	if self.custom_ar_no_ip:
+		batch_doc.db_set("ar_no_ip",self.custom_ar_no_ip)
+	if self.custom_usp:
+		batch_doc.db_set("usp",1)
+	if self.custom_ar_no_usp:
+		batch_doc.db_set("ar_no_usp",self.custom_ar_no_usp)
+	if self.custom_epbp:
+		batch_doc.db_set("epbp",1)
+	if self.custom_ar_no_epbp:
+		batch_doc.db_set("ar_no_epbp",self.custom_ar_no_epbp)
 
 def create_qc_for_retest_batches():
 	tomorrow_date = add_days(nowdate(), 1)

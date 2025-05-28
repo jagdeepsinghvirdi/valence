@@ -1,0 +1,261 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2025-05-27 16:34:48.947077",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_cutg",
+  "amended_from",
+  "naming_series",
+  "item",
+  "item_name",
+  "item_group",
+  "manufacturing_date",
+  "column_break_nwf3",
+  "batch",
+  "batch_qty",
+  "batch_uom",
+  "expiry_date",
+  "retest_date",
+  "ar_no",
+  "spec_section",
+  "ih",
+  "ar_no_ih",
+  "column_break_2iyz",
+  "ip",
+  "ar_no_ip",
+  "column_break_ulot",
+  "usp",
+  "ar_no_usp",
+  "column_break_sfqa",
+  "epbp",
+  "ar_no_epbp",
+  "workflow_section",
+  "workflow_changes"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_cutg",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Test Requisition Form",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "TRF-",
+   "read_only": 1
+  },
+  {
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "batch",
+   "fieldtype": "Link",
+   "label": "Batch",
+   "options": "Batch"
+  },
+  {
+   "default": "0",
+   "fetch_from": "batch.ih",
+   "fetch_if_empty": 1,
+   "fieldname": "ih",
+   "fieldtype": "Check",
+   "label": "Others/IH"
+  },
+  {
+   "fetch_from": "batch.ar_no_ih",
+   "fetch_if_empty": 1,
+   "fieldname": "ar_no_ih",
+   "fieldtype": "Data",
+   "label": "AR No. IH"
+  },
+  {
+   "fieldname": "column_break_2iyz",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fetch_from": "batch.ip",
+   "fetch_if_empty": 1,
+   "fieldname": "ip",
+   "fieldtype": "Check",
+   "label": "IP"
+  },
+  {
+   "fetch_from": "batch.ar_no_ip",
+   "fetch_if_empty": 1,
+   "fieldname": "ar_no_ip",
+   "fieldtype": "Data",
+   "label": "AR No. IP"
+  },
+  {
+   "fieldname": "column_break_ulot",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fetch_from": "batch.usp",
+   "fetch_if_empty": 1,
+   "fieldname": "usp",
+   "fieldtype": "Check",
+   "label": "USP"
+  },
+  {
+   "fetch_from": "batch.ar_no_usp",
+   "fetch_if_empty": 1,
+   "fieldname": "ar_no_usp",
+   "fieldtype": "Data",
+   "label": "AR No. USP"
+  },
+  {
+   "fieldname": "column_break_sfqa",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fetch_from": "batch.epbp",
+   "fetch_if_empty": 1,
+   "fieldname": "epbp",
+   "fieldtype": "Check",
+   "label": "EP/BP"
+  },
+  {
+   "fetch_from": "batch.ar_no_epbp",
+   "fetch_if_empty": 1,
+   "fieldname": "ar_no_epbp",
+   "fieldtype": "Data",
+   "label": "AR No. EP/BP"
+  },
+  {
+   "fieldname": "spec_section",
+   "fieldtype": "Section Break",
+   "label": "Spec"
+  },
+  {
+   "fieldname": "column_break_nwf3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "batch.batch_qty",
+   "fetch_if_empty": 1,
+   "fieldname": "batch_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Batch Qty",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item.stock_uom",
+   "fetch_if_empty": 1,
+   "fieldname": "batch_uom",
+   "fieldtype": "Link",
+   "label": "Batch UOM",
+   "options": "UOM"
+  },
+  {
+   "fetch_from": "item.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "batch.manufacturing_date",
+   "fetch_if_empty": 1,
+   "fieldname": "manufacturing_date",
+   "fieldtype": "Date",
+   "label": "Manufacturing Date"
+  },
+  {
+   "fetch_from": "batch.expiry_date",
+   "fetch_if_empty": 1,
+   "fieldname": "expiry_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Retest/Expiry Date"
+  },
+  {
+   "fetch_from": "batch.retest_date",
+   "fetch_if_empty": 1,
+   "fieldname": "retest_date",
+   "fieldtype": "Date",
+   "hidden": 1,
+   "in_list_view": 1,
+   "label": "Retest Date"
+  },
+  {
+   "fetch_from": "batch.ar_no",
+   "fetch_if_empty": 1,
+   "fieldname": "ar_no",
+   "fieldtype": "Data",
+   "label": "AR No."
+  },
+  {
+   "fetch_from": "item.item_group",
+   "fetch_if_empty": 1,
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "label": "Item Group",
+   "options": "Item Group"
+  },
+  {
+   "fieldname": "workflow_section",
+   "fieldtype": "Section Break",
+   "label": "Workflow"
+  },
+  {
+   "fieldname": "workflow_changes",
+   "fieldtype": "Table",
+   "label": "Workflow Changes",
+   "options": "Workflow State Change"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-05-28 13:44:57.782011",
+ "modified_by": "Administrator",
+ "module": "Valence",
+ "name": "Test Requisition Form",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

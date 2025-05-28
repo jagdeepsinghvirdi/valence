@@ -42,10 +42,12 @@ frappe.ui.form.on('Sales Order Item', {
                     const seal_nos = r.message.map(d => d.seal_no).filter(Boolean).join(', ');
                     const drum_nos = r.message.map(d => d.drum_no).filter(Boolean).join(', ');
                     const batch_no = r.message[0].batch_no;
+                    const released_batch_no = r.message[0].released_batch_no;
 
                     frappe.model.set_value(cdt, cdn, "custom_sealno", seal_nos);
                     frappe.model.set_value(cdt, cdn, "custom_pack", drum_nos);
                     frappe.model.set_value(cdt, cdn, "custom_batch", batch_no);
+                    frappe.model.set_value(cdt, cdn, "custom_released_b_no", released_batch_no);
 
                     if (batch_no) {
                         frappe.call({

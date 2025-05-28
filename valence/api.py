@@ -102,3 +102,41 @@ def get_offday_status(employee, attendance_date,attendance):
                 frappe.db.commit()
             return "Weekly Off"
 
+@frappe.whitelist()
+def fetch_lrf_details(lrf_name):
+    data = []
+    get_batch_no = frappe.db.get_value("Label Requisition Form", lrf_name, "production_b_no")
+    data.append({"batch_no":get_batch_no})
+    
+    try:
+        child = frappe.get_all(
+            "Label Requisition Form Item",  
+            filters={"parent": lrf_name},
+            fields=["seal_no", "drum_no"],
+            )
+        return data + child
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "fetch_lrf_details Error")
+        return {}
+
+@frappe.whitelist()
+def checking_item_grade(item_code,item_name,lrf_name,grade_name):
+    
+    get_batch_no = frappe.db.get_value("Label Requisition Form", lrf_name, "production_b_no")
+    batch_doc = frappe.get_doc("Batch",get_batch_no)
+
+    if grade_name == "Others/IH":
+        if not batch_doc.ih:
+            frappe.throw("{0} Item Has not available for {1} grade.".format(item_name,grade_name))
+    elif grade_name == "IP":
+        if not batch_doc.ip:
+            frappe.throw("{0} Item Has not available for {1} grade.".format(item_name,grade_name))
+    elif grade_name == "USP":
+        if not batch_doc.usp:
+            frappe.throw("{0} Item Has not available for {1} grade.".format(item_name,grade_name))
+    elif grade_name == "EP/BP":
+        if not batch_doc.epbp:
+            frappe.throw("{0} Item Has not available for {1} grade.".format(item_name,grade_name))
+
+    
+    

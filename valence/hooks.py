@@ -47,9 +47,12 @@ app_include_js = [
 doctype_js = {"Work Order" : "public/js/work_order.js",
 			"Production Plan":"public/js/production_plan.js",
 			"Sales Invoice":"public/js/sales_invoice.js",
+            "Sales Order":"public/js/sales_order.js",
 			"Delivery Note":"public/js/delivery_note.js",
 			"Stock Entry":"public/js/stock_entry.js",
             "Attendance":"public/js/attendance.js",
+            "Batch":"public/js/batch.js",
+            "Quality Inspection":"public/js/quality_inspection.js",
 			
 }
 doctype_list_js = {"Batch":"public/js/batch_list.js",
@@ -190,7 +193,7 @@ doc_events = {
 	"Purchase Receipt":{
 		"before_submit":"valence.valence.doc_events.purchase_receipt.before_submit"
 	},
-	("Material Request","Purchase Order","Stock Entry","Quality Inspection") :{
+	("Material Request","Purchase Order","Stock Entry","Quality Inspection","Test Requisition Form") :{
       "before_insert": "valence.valence.doc_events.workflow_state_change.before_insert",
       "before_validate": "valence.valence.doc_events.workflow_state_change.before_validate",
   },

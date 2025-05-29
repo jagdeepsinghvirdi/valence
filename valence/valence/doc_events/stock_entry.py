@@ -84,8 +84,8 @@ def validate_manufacture_entry(self,method):
 						each.quality_inspection = make_quality_inspection(self,each)
 						created_quality_inspections.append(each.quality_inspection)
 					if self.company:
-						lrf_name = frappe.db.get_value("Quality Inspection",each.quality_inspection,'custom_lrf_reference_name')
-						if each.is_finished_item and lrf_name:
+						# lrf_name = frappe.db.get_value("Quality Inspection",each.quality_inspection,'custom_lrf_reference_name')
+						if each.is_finished_item:
 							default_quality_analysis_warehouse=frappe.db.get_value("Company",self.company,"custom_default_quality_analysis_warehouse")
 							if default_quality_analysis_warehouse and default_quality_analysis_warehouse != each.get('t_warehouse'):
 								each.t_warehouse = default_quality_analysis_warehouse
@@ -139,7 +139,7 @@ def make_quality_inspection(se_doc,item):
 			"reference_type": se_doc.doctype,
 			"reference_name": se_doc.name,
 			"custom_entry_type": "LRF" if lrf_reference else "RFA",
-			'custom_lrf_reference_name': lrf_reference,
+			# 'custom_lrf_reference_name': lrf_reference,
 			"item_code": item.item_code,
 			"sample_size": item.qty,
 			"description": item.description,

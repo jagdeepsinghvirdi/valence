@@ -16,9 +16,9 @@ class LabelRequisitionForm(Document):
 		# self.material_transfer_stock_entry()
 		# self.update_sample_size()
 
-	def update_sample_size(self):
-		qi_name = frappe.get_doc("Quality Inspection",{'custom_lrf_reference_name':self.name})
-		qi_name.db_set('sample_size',self.custom_sample_size)
+	# def update_sample_size(self):
+		# qi_name = frappe.get_doc("Quality Inspection",{'custom_lrf_reference_name':self.name})
+		# qi_name.db_set('sample_size',self.custom_sample_size)
 	
 	def create_quality_inspection(self):
 		# Create a new Quality Inspection document
@@ -27,7 +27,7 @@ class LabelRequisitionForm(Document):
 		qi.inspection_type = "Incoming"  # or "In Process" or "Final" depending on your case
 		qi.reference_type = "Stock Entry"
 		qi.reference_name = self.stock_entry_reference_name
-		qi.custom_lrf_reference_name = self.name
+		# qi.custom_lrf_reference_name = self.name
 		qi.item_code = self.production_item
 		qi.batch_no = self.batch_no 
 		qi.sample_size = self.batch_size_kgs

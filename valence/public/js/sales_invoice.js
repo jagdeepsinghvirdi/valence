@@ -53,91 +53,91 @@ frappe.ui.form.on('Sales Invoice Item', {
         });
     },
 
-    // custom_lrf_reference_name: function(frm, cdt, cdn) {       
-    //     console.log("Custom LRF Reference Name changed");
-    //     const row = locals[cdt][cdn];
-    //     if (!row.custom_lrf_reference_name) return;
+    custom_lrf_reference_name: function(frm, cdt, cdn) {       
+        console.log("Custom LRF Reference Name changed");
+        const row = locals[cdt][cdn];
+        if (!row.custom_lrf_reference_name) return;
 
-    //     frappe.call({
-    //         method: "valence.api.fetch_lrf_details",
-    //         args: {
-    //             lrf_name: row.custom_lrf_reference_name
-    //         },
-    //          callback: function(r) {
-    //             if (r.message && Array.isArray(r.message)) {
+        frappe.call({
+            method: "valence.api.fetch_lrf_details",
+            args: {
+                lrf_name: row.custom_lrf_reference_name
+            },
+             callback: function(r) {
+                if (r.message && Array.isArray(r.message)) {
                     
-    //                 const seal_nos = r.message.map(d => d.seal_no).filter(Boolean).join(', ');
-    //                 const drum_nos = r.message.map(d => d.drum_no).filter(Boolean).join(', ');
-    //                 const batch_no = r.message[0].batch_no;
-    //                 const released_batch_no = r.message[0].released_batch_no;
+                    const seal_nos = r.message.map(d => d.seal_no).filter(Boolean).join(', ');
+                    const drum_nos = r.message.map(d => d.drum_no).filter(Boolean).join(', ');
+                    const batch_no = r.message[0].batch_no;
+                    const released_batch_no = r.message[0].released_batch_no;
 
-    //                 frappe.model.set_value(cdt, cdn, "seal_no", seal_nos);
-    //                 frappe.model.set_value(cdt, cdn, "pack_size", drum_nos);
-    //                 frappe.model.set_value(cdt, cdn, "batch_item", batch_no);
-    //                 frappe.model.set_value(cdt, cdn, "custom_released_b_no", released_batch_no);
+                    frappe.model.set_value(cdt, cdn, "seal_no", seal_nos);
+                    frappe.model.set_value(cdt, cdn, "pack_size", drum_nos);
+                    frappe.model.set_value(cdt, cdn, "batch_item", batch_no);
+                    frappe.model.set_value(cdt, cdn, "custom_released_b_no", released_batch_no);
 
 
-    //                 if (batch_no) {
-    //                     frappe.call({
-    //                         method: "frappe.client.get",
-    //                         args: {
-    //                             doctype: "Batch",
-    //                             name: batch_no
-    //                         },
-    //                         callback: function(res) {
-    //                             if (res.message) {
-    //                                 const batch = res.message;
-    //                                 frappe.model.set_value(cdt, cdn, "mfg_date", batch.manufacturing_date || "");
-    //                                 frappe.model.set_value(cdt, cdn, "date_expiry", batch.retest_date || "");
-    //                             }
-    //                         }
-    //                     });
-    //                 }
-    //             }
-    //         }
-    //     });
-    // },
+                    if (batch_no) {
+                        frappe.call({
+                            method: "frappe.client.get",
+                            args: {
+                                doctype: "Batch",
+                                name: batch_no
+                            },
+                            callback: function(res) {
+                                if (res.message) {
+                                    const batch = res.message;
+                                    frappe.model.set_value(cdt, cdn, "mfg_date", batch.manufacturing_date || "");
+                                    frappe.model.set_value(cdt, cdn, "date_expiry", batch.retest_date || "");
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    },
 
-    // custom_grade:function(frm, cdt, cdn) {
-    //     console.log("Please check that we are using grade...............")
-    //     const row = locals[cdt][cdn];
+    custom_grade:function(frm, cdt, cdn) {
+        console.log("Please check that we are using grade...............")
+        const row = locals[cdt][cdn];
 
-    //     frappe.call({
-    //         method: "valence.api.checking_item_grade",
-    //         args: {
-    //             item_code: row.item_code,
-    //             item_name: row.item_name,
-    //             // lrf_name: row.custom_lrf_reference_name,
-    //             grade_name: row.custom_grade
-    //         } ,
-    //         callback: function(r){
-    //         }
+        frappe.call({
+            method: "valence.api.checking_item_grade",
+            args: {
+                item_code: row.item_code,
+                item_name: row.item_name,
+                lrf_name: row.custom_lrf_reference_name,
+                grade_name: row.custom_grade
+            } ,
+            callback: function(r){
+            }
 
-    //     })
-    // }
+        })
+    }
 });
 
-// function render_dialog_with_visibility(frm, cdn, show) {
-//     const grid = frm.fields_dict["items"].grid;
-//     const row = grid.grid_rows_by_docname[cdn];
-//     if (!row) return;
+function render_dialog_with_visibility(frm, cdn, show) {
+    const grid = frm.fields_dict["items"].grid;
+    const row = grid.grid_rows_by_docname[cdn];
+    if (!row) return;
 
-//     row.toggle_view(true); // Open dialog
+    row.toggle_view(true); // Open dialog
 
-//     // Wait for the form to render
-//     setTimeout(() => {
-//         const grid_form = row.grid_form;
-//         if (!grid_form) return;
+    // Wait for the form to render
+    setTimeout(() => {
+        const grid_form = row.grid_form;
+        if (!grid_form) return;
 
-//         ['custom_grade'].forEach(fieldname => {
-//             const field = grid_form.fields_dict[fieldname];
-//             if (field) {
-//                 field.df.hidden = !show;
-//                 field.refresh();
-//             }
-//         });
-//     }, 1000);
-// }
+        ['custom_grade'].forEach(fieldname => {
+            const field = grid_form.fields_dict[fieldname];
+            if (field) {
+                field.df.hidden = !show;
+                field.refresh();
+            }
+        });
+    }, 1000);
+}
 
 
 

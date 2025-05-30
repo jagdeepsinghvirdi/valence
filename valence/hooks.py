@@ -47,7 +47,6 @@ app_include_js = [
 doctype_js = {"Work Order" : "public/js/work_order.js",
 			"Production Plan":"public/js/production_plan.js",
 			"Sales Invoice":"public/js/sales_invoice.js",
-            "Sales Order":"public/js/sales_order.js",
 			"Delivery Note":"public/js/delivery_note.js",
 			"Stock Entry":"public/js/stock_entry.js",
             "Attendance":"public/js/attendance.js",

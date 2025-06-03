@@ -199,8 +199,7 @@
    "fetch_if_empty": 1,
    "fieldname": "no_of_packages",
    "fieldtype": "Data",
-   "label": "No of Containers",
-   "read_only": 1
+   "label": "No of Containers"
   },
   {
    "fieldname": "inspected_by",
@@ -289,7 +288,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-05-28 15:54:29.755663",
+ "modified": "2025-06-02 10:46:38.118444",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Label Requisition Form",

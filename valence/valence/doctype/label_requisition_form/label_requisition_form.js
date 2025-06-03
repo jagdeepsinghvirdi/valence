@@ -1,48 +1,16 @@
 frappe.ui.form.on('Label Requisition Form', {
-    production_item: function (frm) {
-        if (!frm.doc.production_item) {
-            frm.set_df_property('spec', 'hidden', 1);
-            return;
-        }
+     no_of_packages(frm) {
+        let total_containers = frm.doc.no_of_packages;
 
-        // Step 1: Get item_group of selected Item
-        frappe.call({
-            method: "frappe.client.get_value",
-            args: {
-                doctype: "Item",
-                filters: { name: frm.doc.production_item },
-                fieldname: "item_group"
-            },
-            callback: function (item_res) {
-                if (item_res.message) {
-                    console.log(item_res);
-                    let item_group = item_res.message.item_group;
+        if (total_containers && total_containers > 0) {
+            frm.clear_table("label_details");
 
-                    // Step 2: Get parent_item_group of the item_group
-                    frappe.call({
-                        method: "frappe.client.get_value",
-                        args: {
-                            doctype: "Item Group",
-                            filters: { name: item_group },
-                            fieldname: "parent_item_group"
-                        },
-                        callback: function (group_res) {
-                            console.log(group_res);
-                            let parent_group = group_res.message ? group_res.message.parent_item_group : null;
-
-                            if (item_group === "Finished Goods" || parent_group === "Finished Goods") {
-                                frm.set_df_property('spec', 'hidden', 0);
-                            } else {
-                                frm.set_df_property('spec', 'hidden', 1);
-                            }
-                        }
-                    });
-                }
+            for (let i = 1; i <= total_containers; i++) {
+                let row = frm.add_child("label_details");
+                row.drum_no = `${String(i).padStart(2, '0')}/${total_containers}`;
             }
-        });
-    },
 
-    onload: function (frm) {
-        frm.trigger('production_item');
+            frm.refresh_field("label_details");
+        }
     }
 });

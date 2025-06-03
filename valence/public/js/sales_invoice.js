@@ -87,8 +87,19 @@ frappe.ui.form.on('Sales Invoice Item', {
                             callback: function(res) {
                                 if (res.message) {
                                     const batch = res.message;
-                                    frappe.model.set_value(cdt, cdn, "mfg_date", batch.manufacturing_date || "");
-                                    frappe.model.set_value(cdt, cdn, "date_expiry", batch.retest_date || "");
+                                    const formatMMMYY = (dateStr) => {
+                                        const date = frappe.datetime.str_to_obj(dateStr);
+                                        const month = date.toLocaleString('default', { month: 'short' }).toUpperCase();
+                                        const year = date.getFullYear().toString().slice(-2);
+                                        return `${month}-${year}`;
+                                    };
+
+                                    if (batch.manufacturing_date) {
+                                        frappe.model.set_value(cdt, cdn, "mfg_date", formatMMMYY(batch.manufacturing_date));
+                                    }
+                                    if (batch.retest_date) {
+                                        frappe.model.set_value(cdt, cdn, "date_expiry", formatMMMYY(batch.retest_date));
+                                    }
                                 }
                             }
                         });
@@ -129,7 +140,7 @@ function render_dialog_with_visibility(frm, cdn, show) {
         const grid_form = row.grid_form;
         if (!grid_form) return;
 
-        ['custom_grade'].forEach(fieldname => {
+        ['custom_lrf_reference_name','custom_grade','custom_released_b_no'].forEach(fieldname => {
             const field = grid_form.fields_dict[fieldname];
             if (field) {
                 field.df.hidden = !show;

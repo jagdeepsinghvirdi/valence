@@ -1,5 +1,7 @@
 import frappe
 from frappe import _
+from valence.valence.monkey_patch.serial_batch_bundle import create_batch
+
 # import frappe.printing
 
 def on_submit(self, method):
@@ -143,7 +145,7 @@ def make_quality_inspection(se_doc,item):
 			"item_code": item.item_code,
 			"sample_size": item.qty,
 			"description": item.description,
-			"batch_no": item.batch_no,
+			"batch_no": item.batch_no if item.batch_no else create_batch(item),
 			"lot_no": item.lot_no,
 			"ar_no":item.ar_no,
 		})

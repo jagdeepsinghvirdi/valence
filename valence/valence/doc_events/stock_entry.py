@@ -142,7 +142,7 @@ def make_quality_inspection(se_doc,item):
 		elif wo_batch:
 			batch = wo_batch[0]
 		else:
-			create_batch(item)
+			batch = create_batch(item)
 		qi_doc.update({
 			"inspection_type": "Incoming",
 			"reference_type": se_doc.doctype,

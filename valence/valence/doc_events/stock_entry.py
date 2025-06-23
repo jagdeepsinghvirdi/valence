@@ -136,13 +136,11 @@ def make_quality_inspection(se_doc,item):
 
 	def create_quality_inspection(lrf_reference = None):
 		qi_doc=frappe.new_doc("Quality Inspection")
-		wo_batch = frappe.get_all("Batch",filters={"reference_doctype":"Work Order","reference_name":se_doc.work_order,"item":item.item_code})
+		wo_batch = frappe.get_all("Batch",filters={"reference_doctype":"Stock Entry","reference_name":se_doc.name,"item":item.item_code})
 		if item.batch_no:
 			batch = item.batch_no
 		elif wo_batch:
-			batch = wo_batch[0]
-		else:
-			batch = create_batch(item)
+			batch = wo_batch[0].name
 		qi_doc.update({
 			"inspection_type": "Incoming",
 			"reference_type": se_doc.doctype,

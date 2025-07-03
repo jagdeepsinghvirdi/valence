@@ -95,7 +95,7 @@ def validate_manufacture_entry(self,method):
 							default_quality_inspection_warehouse=frappe.db.get_value("Company",self.company,"default_quality_inspection_warehouse")
 							if default_quality_inspection_warehouse and default_quality_inspection_warehouse != each.get('t_warehouse'):
 								each.t_warehouse = default_quality_inspection_warehouse
-	elif self.stock_entry_type == "Repack":
+	elif frappe.db.get_value("Stock Entry Type", self.stock_entry_type, "purpose") == "Repack":
 		# production_item=frappe.db.get_value("BOM",self.bom_no,"item")
 		for each in self.items:
 			if self.custom_quality_inspection_for_bland:

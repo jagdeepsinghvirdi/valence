@@ -70,6 +70,7 @@ def on_submit(self, method):
 def validate_manufacture_entry(self,method):
 	
 	created_quality_inspections = []
+	created_lrf_docs = []
 	
 	if self.stock_entry_type == "Manufacture" and self.bom_no and self.work_order:		
 		
@@ -107,6 +108,9 @@ def validate_manufacture_entry(self,method):
 						default_quality_inspection_warehouse=frappe.db.get_value("Company",self.company,"default_quality_inspection_warehouse")
 						if default_quality_inspection_warehouse and default_quality_inspection_warehouse != each.get('t_warehouse'):
 							each.t_warehouse = default_quality_inspection_warehouse
+			if self.custom_lrf_required:
+				if each.is_finished_item and each.t_warehouse:
+					each.lrf  = make_lrf_entry(self,each)
 	
 	if created_quality_inspections:
 		links = ', '.join(
@@ -165,7 +169,7 @@ def make_quality_inspection(se_doc,item):
 		if not item.quality_inspection_required_for_scrap and not item.is_scrap_item:
 			
 			# Create LRF Entry
-			lrf_doc = frappe.new_doc("Label Requisition Form")  # Replace "LRF" with actual DocType name if different
+			lrf_doc = frappe.new_doc("Label Requisition Form")
 			lrf_doc.update({
 				"production_item": production_item,            
 				"grade":'NA' if se_doc.custom_is_item_intermediate_stage else '',
@@ -185,6 +189,32 @@ def make_quality_inspection(se_doc,item):
 			return create_quality_inspection()
 	else:
 		return create_quality_inspection()
+
+
+def make_lrf_entry(se_doc,item):
+    production_item = frappe.db.get_value("Work Order",se_doc.work_order,"production_item")
+    get_batch_no = frappe.db.get_value("Work Order",se_doc.work_order,"batch_no")    
+    is_final_stage = frappe.db.get_value("Item",item,"custom_is_final_stage")
+    item_stage = frappe.db.get_value("Item",item,"custom_item_stage")
+
+    if is_final_stage and int(item_stage)>0:
+        # Create LRF Entry
+        lrf_doc = frappe.new_doc("Label Requisition Form")
+        lrf_doc.update({
+			"production_item": production_item,            
+			"grade":'NA' if se_doc.custom_is_item_intermediate_stage else '',
+			"production_b_no": get_batch_no,
+			"stock_entry_reference_name": se_doc.name,
+			"inspected_by": se_doc.modified_by,
+		})
+        lrf_doc.flags.ignore_mandatory=True
+        lrf_doc.flags.ignore_permissions=True
+        lrf_doc.flags.ignore_links = True
+        lrf_doc.save()
+        
+        # Show link in message
+        link = f'<a href="/app/label-requisition-form/{lrf_doc.name}" target="_blank">{lrf_doc.name}</a>'
+        frappe.msgprint(f"<b>LRF created:</b> {link}", title="Label Requisition Form", indicator="green")        
 
 def stock_entry_quality_inspection_validation(self, method=None):
 	if (

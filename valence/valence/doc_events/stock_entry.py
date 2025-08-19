@@ -110,7 +110,8 @@ def validate_manufacture_entry(self,method):
 							each.t_warehouse = default_quality_inspection_warehouse
 			if self.custom_lrf_required:
 				if each.is_finished_item and each.t_warehouse:
-					each.lrf  = make_lrf_entry(self,each)
+					lrf_doc  = make_lrf_entry(self,each)
+					created_lrf_docs.append(lrf_doc)
 	
 	if created_quality_inspections:
 		links = ', '.join(
@@ -122,6 +123,19 @@ def validate_manufacture_entry(self,method):
 				f"<b>Quality Inspections created:</b>{links}",
 				title="Quality Inspections",
 				indicator="green"
+			)
+   
+	# Show LRF links
+	if created_lrf_docs:
+		links = ', '.join(
+			f'<a href="/app/label-requisition-form/{name}" target="_blank">{name}</a>'
+			for name in created_lrf_docs if name
+		)
+		if links:
+			frappe.msgprint(
+				f"<b>LRF Documents created:</b> {links}",
+				title="LRF Documents",
+				indicator="blue"
 			)
 	
 	# if created_quality_inspections:
@@ -201,9 +215,9 @@ def make_lrf_entry(se_doc,item):
         # Create LRF Entry
         lrf_doc = frappe.new_doc("Label Requisition Form")
         lrf_doc.update({
-			"production_item": production_item,            
+			"production_item": production_item if production_item else '',            
 			"grade":'NA' if se_doc.custom_is_item_intermediate_stage else '',
-			"production_b_no": get_batch_no,
+			"production_b_no": get_batch_no if get_batch_no else '',
 			"stock_entry_reference_name": se_doc.name,
 			"inspected_by": se_doc.modified_by,
 		})
@@ -212,9 +226,7 @@ def make_lrf_entry(se_doc,item):
         lrf_doc.flags.ignore_links = True
         lrf_doc.save()
         
-        # Show link in message
-        link = f'<a href="/app/label-requisition-form/{lrf_doc.name}" target="_blank">{lrf_doc.name}</a>'
-        frappe.msgprint(f"<b>LRF created:</b> {link}", title="Label Requisition Form", indicator="green")        
+        return lrf_doc.name       
 
 def stock_entry_quality_inspection_validation(self, method=None):
 	if (

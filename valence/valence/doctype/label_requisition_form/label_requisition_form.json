@@ -175,7 +175,7 @@
    "fetch_from": "production_b_no.manufacturing_date",
    "fetch_if_empty": 1,
    "fieldname": "manufacturing_date",
-   "fieldtype": "Date",
+   "fieldtype": "Data",
    "label": "Manufacturing Date"
   },
   {
@@ -183,7 +183,7 @@
    "fetch_from": "production_b_no.retest_date",
    "fetch_if_empty": 1,
    "fieldname": "retestexpiry_date",
-   "fieldtype": "Date",
+   "fieldtype": "Data",
    "label": "Retest/Expiry Date"
   },
   {
@@ -288,7 +288,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-08-20 10:48:08.107525",
+ "modified": "2025-08-20 12:06:48.705324",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Label Requisition Form",

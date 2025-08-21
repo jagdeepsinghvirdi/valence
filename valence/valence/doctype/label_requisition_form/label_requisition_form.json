@@ -211,6 +211,7 @@
   {
    "fieldname": "stock_entry_reference_name",
    "fieldtype": "Link",
+   "hidden": 1,
    "in_global_search": 1,
    "in_list_view": 1,
    "label": "Stock Entry Reference Name",
@@ -288,7 +289,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-08-20 14:40:54.129727",
+ "modified": "2025-08-21 12:45:28.373976",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Label Requisition Form",

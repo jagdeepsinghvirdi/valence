@@ -84,7 +84,7 @@ def validate_manufacture_entry(self,method):
 					
 					if not each.get('quality_inspection'):	
 												
-						each.quality_inspection = make_quality_inspection(self,each)
+						each.quality_inspection = make_quality_inspection_lrf(self,each)
 						created_quality_inspections.append(each.quality_inspection)
 					if self.company:
 						# lrf_name = frappe.db.get_value("Quality Inspection",each.quality_inspection,'custom_lrf_reference_name')
@@ -135,28 +135,66 @@ def validate_manufacture_entry(self,method):
 				f"<b>LRF Documents created:</b> {links}",
 				indicator="blue"
 			)
-	
-	# if created_quality_inspections:
-	# 	links = ''.join(
-	# 		f'<a href="/app/quality-inspection/{name}" target="_blank">{name}</a>,'
-	# 		for name in created_quality_inspections
-	# 	)
-	# 	frappe.msgprint(f"<b>Quality Inspections created:</b>{links}", title="Quality Inspections", indicator="green")
-
+   
+def make_quality_inspection_lrf(se_doc,item):
+    production_item = frappe.db.get_value("Work Order",se_doc.work_order,"production_item")
+    get_batch_no = frappe.db.get_value("Work Order",se_doc.work_order,"batch_no")
+    is_final_stage = frappe.db.get_value("Item",production_item,"custom_is_final_stage")
+    item_stage = frappe.db.get_value("Item",production_item,"custom_item_stage")
+    
+    def create_quality_inspection(lrf_reference = None):
+        qi_doc=frappe.new_doc("Quality Inspection")
+        wo_batch = frappe.get_all("Batch",filters={"reference_doctype":"Stock Entry","reference_name":se_doc.name,"item":item.item_code})
+        if item.batch_no:
+            batch = item.batch_no
+        elif wo_batch:
+            batch = wo_batch[0].name
+            
+        qi_doc.update({
+			"inspection_type": "Incoming",
+			"reference_type": se_doc.doctype,
+			"reference_name": se_doc.name,
+			"custom_entry_type": "LRF" if lrf_reference else "RFA",
+			'custom_lrf_reference_name': lrf_reference,
+			"item_code": item.item_code,
+			"sample_size": item.qty,
+			"description": item.description,
+			"batch_no": batch,
+			"lot_no": item.lot_no,
+			"ar_no":item.ar_no,
+		})
+        qi_doc.flags.ignore_mandatory=True
+        qi_doc.flags.ignore_permissions=True
+        qi_doc.flags.ignore_links = True
+        qi_doc.save()
+        return qi_doc.name
+    
+    if (is_final_stage or se_doc.custom_is_item_intermediate_stage) and int(item_stage)>0:
+        if not item.quality_inspection_required_for_scrap and not item.is_scrap_item:
+            
+            # Create LRF Entry
+            lrf_doc = frappe.new_doc("Label Requisition Form")
+            lrf_doc.update({
+				"production_item": production_item if production_item else item.item_code,            
+				"grade":'NA' if se_doc.custom_is_item_intermediate_stage else '',
+				"production_b_no": get_batch_no,
+				"stock_entry_reference_name": se_doc.name,
+				"inspected_by": se_doc.modified_by,
+			})
+            lrf_doc.flags.ignore_mandatory = True
+            lrf_doc.flags.ignore_permissions = True
+            lrf_doc.insert()
+            # Show link in message
+            link = f'<a href="/app/label-requisition-form/{lrf_doc.name}" target="_blank">{lrf_doc.name}</a>'
+            frappe.msgprint(f"<b>LRF created:</b> {link}", title="Label Requisition Form", indicator="green")
+            
+            return create_quality_inspection(lrf_doc.name)
+        else:
+            return create_quality_inspection()
+    else:
+        return create_quality_inspection()
 
 def make_quality_inspection(se_doc,item):
-	
-	# production_item, get_batch_no = None, None
-    
-	# if se_doc.work_order:
-	# 	production_item = frappe.db.get_value("Work Order",se_doc.work_order,"production_item")
-	# 	get_batch_no = frappe.db.get_value("Work Order",se_doc.work_order,"batch_no")
-	# 	is_final_stage = frappe.db.get_value("Item",production_item,"custom_is_final_stage")
-	# 	item_stage = frappe.db.get_value("Item",production_item,"custom_item_stage")
-	# else:
-	# 	is_final_stage = frappe.db.get_value("Item",item.item_code,"custom_is_final_stage")
-	# 	item_stage = frappe.db.get_value("Item",item.item_code,"custom_item_stage")
-
 	
 	qi_doc=frappe.new_doc("Quality Inspection")
 	wo_batch = frappe.get_all("Batch",filters={"reference_doctype":"Stock Entry","reference_name":se_doc.name,"item":item.item_code})
@@ -184,41 +222,9 @@ def make_quality_inspection(se_doc,item):
 	qi_doc.save()
 	return qi_doc.name
 
-	# if (is_final_stage or se_doc.custom_is_item_intermediate_stage) and int(item_stage)>0:
-	# 	if not item.quality_inspection_required_for_scrap and not item.is_scrap_item:
-			
-	# 		# Create LRF Entry
-	# 		lrf_doc = frappe.new_doc("Label Requisition Form")
-	# 		lrf_doc.update({
-	# 			"production_item": production_item if production_item else item.item_code,            
-	# 			"grade":'NA' if se_doc.custom_is_item_intermediate_stage else '',
-	# 			"production_b_no": get_batch_no,
-	# 			"stock_entry_reference_name": se_doc.name,
-	# 			"inspected_by": se_doc.modified_by,
-	# 		})
-	# 		lrf_doc.flags.ignore_mandatory = True
-	# 		lrf_doc.flags.ignore_permissions = True
-	# 		lrf_doc.insert()
-	# 		# Show link in message
-	# 		link = f'<a href="/app/label-requisition-form/{lrf_doc.name}" target="_blank">{lrf_doc.name}</a>'
-	# 		frappe.msgprint(f"<b>LRF created:</b> {link}", title="Label Requisition Form", indicator="green")
-
-	# 		return create_quality_inspection(lrf_doc.name)
-	# 	else:
-	# 		return create_quality_inspection()
-	# else:
-	# 	return create_quality_inspection()
-
 
 def make_lrf_entry(se_doc,item):
-	# production_item, get_batch_no = None, None
- 
-	# if se_doc.work_order:
-	# 	production_item = frappe.db.get_value("Work Order",se_doc.work_order,"production_item")
-	# 	get_batch_no = frappe.db.get_value("Work Order",se_doc.work_order,"batch_no")
-	# 	is_final_stage = frappe.db.get_value("Item",production_item,"custom_is_final_stage")
-	# 	item_stage = frappe.db.get_value("Item",production_item,"custom_item_stage")
-	# else:
+	
 	is_final_stage = frappe.db.get_value("Item",item.item_code,"custom_is_final_stage")
 	item_stage = frappe.db.get_value("Item",item.item_code,"custom_item_stage")
   

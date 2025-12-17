@@ -150,7 +150,7 @@ override_doctype_class = {
 	"Sales Invoice":"valence.valence.override.sales_invoice.SalesInvoice",
 	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
-	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
+	# "Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
     "Attendance":"valence.valence.override.attendance.Attendance",
     "Shift Type":"valence.valence.override.shift_type.ShiftType"
 }
@@ -221,6 +221,9 @@ scheduler_events = {
             "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches",
             "valence.valence.doc_events.attendance.process_attendance_offdays"
         ],
+        "0 4 * * THU": [
+			"valence.api.sales_invoice_payment_remainder",
+		]
     }
 }
 

@@ -10,7 +10,7 @@ class Attendance(_Attendance):
 	def validate(self):
 		from erpnext.controllers.status_updater import validate_status
 
-		validate_status(self.status, ["Present", "Absent", "On Leave", "Half Day", "Work From Home","In Mispunch","Out Mispunch","No punch","Present With Short Leave","Holiday","Weekly Off"])
+		validate_status(self.status, ["Present", "Absent", "On Leave", "Half Day", "Work From Home","Mispunch","No punch","Present With Short Leave","Holiday","On Duty", "Weekly Off"])
 		validate_active_employee(self.employee)
 		self.validate_attendance_date()
 		self.validate_duplicate_record()

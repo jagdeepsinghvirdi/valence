@@ -3,18 +3,22 @@ from frappe.utils import getdate, nowdate, add_days, get_first_day, get_last_day
 from datetime import datetime, timedelta
 
 def set_status(self, method):
-    if not self.in_time and not self.out_time: 
+    if not self.in_time and self.out_time:
+        self.db_set('status',"Mispunch") 
+    elif not self.out_time and self.in_time:
+        self.db_set('status',"Mispunch") 
+    # elif self.attendance_request and (self.in_time or self.out_time):
+    #     self.db_set("status","Present")
+    elif self.attendance_request:
+        self.db_set("status",frappe.db.get_value("Attendance Request",self.attendance_request,"reason"))
+    elif not self.in_time and not self.out_time: 
         from valence.api import get_offday_status     
         if not self.in_time and not self.out_time:        
             att_status = get_offday_status(self.employee,self.attendance_date,self.name)
             if att_status:
                 self.db_set('status',att_status)       
             else:
-                self.status = "No punch"
-    elif not self.in_time:
-        self.status = "In Mispunch"
-    elif not self.out_time:
-        self.status = "Out Mispunch"
+                self.db_set('status',"No punch") 
     elif self.in_time and self.out_time:
         
         FMT = "%Y-%m-%d %H:%M:%S"
@@ -34,8 +38,8 @@ def set_status(self, method):
 
         # Convert to decimal hours
         hours = round(duration_seconds / 3600, 1)  # One digit after point
-        if not self.working_hours:
-            self.db_set('working_hours',hours)
+        # if not self.working_hours:
+        self.db_set('working_hours',hours)
 
         
         # Get shift thresholds

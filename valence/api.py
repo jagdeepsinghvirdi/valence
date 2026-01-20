@@ -6,14 +6,19 @@ from datetime import datetime, timedelta
 from frappe.utils import flt,cint, get_url_to_form, nowdate
 from erpnext.accounts.utils import getdate
 from email.utils import formataddr
+from valence.valence.doc_events.attendance import set_status
+
+import frappe
+from frappe.utils import get_datetime
+from datetime import timedelta
 
 @frappe.whitelist()
-def get_employee_checkin_entries(employee, attendance_date):
-    # Convert string to datetime and define start and end of the day
+def get_employee_checkin_entries(employee, attendance_date, doc):
+    # 1. Convert string date to datetime objects
     start_date = get_datetime(attendance_date)
     end_date = start_date + timedelta(days=1)
 
-    # Fetch first check-in (earliest)
+    # 2. Fetch first and last check-ins
     in_time_doc = frappe.get_all(
         "Employee Checkin",
         filters={
@@ -25,7 +30,73 @@ def get_employee_checkin_entries(employee, attendance_date):
         limit_page_length=1
     )
 
-    # Fetch last check-in (latest)
+    out_time_doc = frappe.get_all(
+        "Employee Checkin",
+        filters={
+            "employee": employee,
+            "time": ["between", [start_date, end_date]]
+        },
+        fields=["time"],
+        order_by="time desc",
+        limit_page_length=1
+    )
+    # 3. Get the times
+    if in_time_doc == out_time_doc:
+        in_time = in_time_doc[0].time if in_time_doc else None
+        out_time = None
+    else:
+        in_time = in_time_doc[0].time if in_time_doc else None
+        out_time = out_time_doc[0].time if out_time_doc else None
+
+    # 4. Load the Attendance document
+    attendance_doc = frappe.get_doc("Attendance", doc)
+    
+    # 5. Update the values in memory first so set_status can calculate
+    attendance_doc.in_time = in_time
+    attendance_doc.out_time = out_time
+
+    # 6. Manually update in_time and out_time in DB (since it's submitted)
+    attendance_doc.db_set('in_time', in_time)
+    attendance_doc.db_set('out_time', out_time)
+
+    # 7. Run your status logic
+    # Your set_status already uses db_set for status and working_hours, 
+    # so it will work fine on a submitted document.
+    set_status(attendance_doc, "validate")
+    
+    return {
+        "in_time": in_time,
+        "out_time": out_time,
+        "status": attendance_doc.status
+    }
+
+@frappe.whitelist()
+def get_employee_checkin_entries_multiple(employee, attendance_date, attendance):
+    messages = []
+
+    # Convert date safely
+    if isinstance(attendance_date, str):
+        date_obj = datetime.strptime(attendance_date, "%Y-%m-%d").date()
+        start_date = get_datetime(attendance_date)
+    else:
+        date_obj = attendance_date
+        start_date = get_datetime(attendance_date)
+
+    end_date = start_date + timedelta(days=1)
+
+    # Fetch first check-in
+    in_time_doc = frappe.get_all(
+        "Employee Checkin",
+        filters={
+            "employee": employee,
+            "time": ["between", [start_date, end_date]]
+        },
+        fields=["time"],
+        order_by="time asc",
+        limit_page_length=1
+    )
+
+    # Fetch last check-in
     out_time_doc = frappe.get_all(
         "Employee Checkin",
         filters={
@@ -37,11 +108,107 @@ def get_employee_checkin_entries(employee, attendance_date):
         limit_page_length=1
     )
 
-    return {
-        "in_time": in_time_doc[0].time if in_time_doc else None,
-        "out_time": out_time_doc[0].time if out_time_doc else None
-    }
+    if in_time_doc == out_time_doc:
+        in_time = in_time_doc[0].time if in_time_doc else None
+        out_time = None
+    else:
+        in_time = in_time_doc[0].time if in_time_doc else None
+        out_time = out_time_doc[0].time if out_time_doc else None
 
+    # ------------------------------------------------
+    # Case 1: At least one punch exists
+    # ------------------------------------------------
+    if in_time or out_time:
+        frappe.db.set_value(
+            "Attendance",
+            attendance,
+            {
+                "in_time": in_time,
+                "out_time": out_time
+            }
+        )
+        set_status(frappe.get_doc("Attendance", attendance), "validate")
+        return {
+            "attendance": attendance,
+            "message": f"{attendance}: Check-in entries fetched successfully."
+        }
+
+    # ------------------------------------------------
+    # Case 2: No punches → Holiday / Weekly Off
+    # ------------------------------------------------
+
+    holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+    if holiday_list and frappe.db.exists(
+        "Holiday",
+        {"holiday_date": date_obj, "parent": holiday_list}
+    ):
+        holiday_doc = frappe.get_doc("Holiday List", holiday_list)
+
+        for holiday in holiday_doc.holidays:
+            if holiday.holiday_date == date_obj:
+                if holiday.weekly_off:
+                    frappe.db.set_value(
+                        "Attendance",
+                        attendance,
+                        {
+                            "status": "Weekly Off",
+                            "leave_type": None
+                        }
+                    )
+                    return {
+                        "attendance": attendance,
+                        "message": f"{attendance}: Marked as Weekly Off."
+                    }
+                else:
+                    frappe.db.set_value(
+                        "Attendance",
+                        attendance,
+                        {
+                            "status": "Holiday",
+                            "leave_type": None
+                        }
+                    )
+                    return {
+                        "attendance": attendance,
+                        "message": f"{attendance}: Marked as Holiday."
+                    }
+
+    # Shift Assignment weekly off check
+    shift_assignments = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "start_date": ["<=", date_obj]
+        },
+        fields=["custom_off_day", "end_date"]
+    )
+
+    valid_shifts = [
+        s for s in shift_assignments
+        if not s.end_date or s.end_date >= date_obj
+    ]
+
+    if valid_shifts:
+        weekday = date_obj.strftime("%A")
+        if weekday == valid_shifts[0].custom_off_day:
+            frappe.db.set_value(
+                "Attendance",
+                attendance,
+                {
+                    "status": "Weekly Off",
+                    "leave_type": None
+                }
+            )
+            return {
+                "attendance": attendance,
+                "message": f"{attendance}: Marked as Weekly Off."
+            }
+
+    return {
+        "attendance": attendance,
+        "message": f"{attendance}: No check-in entries found."
+    }
+    
 @frappe.whitelist()
 def get_offday_status(employee, attendance_date,attendance):
     

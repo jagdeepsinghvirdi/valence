@@ -223,7 +223,7 @@
    "property": "options",
    "property_type": "Small Text",
    "row_name": null,
-   "value": "\nPresent\nAbsent\nIn Mispunch\nOut Mispunch\nNo punch\nOn Leave\nHalf Day\nWork From Home\nPresent With Short Leave\nHoliday\nWeekly Off"
+   "value": "\nPresent\nAbsent\nMispunch\nNo punch\nOn Leave\nHalf Day\nWork From Home\nPresent With Short Leave\nHoliday\nWeekly Off\nOn Duty"
   }
  ],
  "sync_on_migrate": 1

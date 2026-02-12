@@ -1,16 +1,12 @@
 import frappe
-
-import frappe
 from frappe.utils import get_datetime, get_datetime_str
 from datetime import datetime, timedelta
 from frappe.utils import flt,cint, get_url_to_form, nowdate
 from erpnext.accounts.utils import getdate
 from email.utils import formataddr
 from valence.valence.doc_events.attendance import set_status
-
-import frappe
-from frappe.utils import get_datetime
-from datetime import timedelta
+# from frappe.utils import get_datetime
+# from datetime import timedelta
 
 @frappe.whitelist()
 def get_employee_checkin_entries(employee, attendance_date, doc):

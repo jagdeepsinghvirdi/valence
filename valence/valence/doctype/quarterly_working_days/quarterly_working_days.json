@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "HR-QWD-.YYYY.-.#####",
+ "creation": "2026-08-07 16:37:11.141984",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "quarterly_working_days_section",
+  "employee",
+  "company",
+  "quarter_start_date",
+  "quarter_end_date",
+  "working_days",
+  "is_manual_entry"
+ ],
+ "fields": [
+  {
+   "fieldname": "quarterly_working_days_section",
+   "fieldtype": "Section Break",
+   "label": "Quarterly Working Days"
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "quarter_start_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Quarter Start Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "quarter_end_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Quarter End Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "working_days",
+   "fieldtype": "Float",
+   "label": "Working Days",
+   "reqd": 1
+  },
+  {
+   "default": "checked",
+   "fieldname": "is_manual_entry",
+   "fieldtype": "Check",
+   "label": "Is Manual Entry"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-07 17:08:24.922178",
+ "modified_by": "imjaskiratsingh03@gmail.com",
+ "module": "Valence",
+ "name": "Quarterly Working Days",
+ "naming_rule": "Expression",
+ "owner": "imjaskiratsingh03@gmail.com",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

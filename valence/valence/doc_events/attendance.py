@@ -283,7 +283,11 @@ def set_short_leave_count(self, method):
                     self.half_day_status = "Present"
 
                 if leave_type:
-                    # Create a leave application
+                    # Create a leave application (same-day half-day; bypass 72-hour notice rule)
+                    from valence.valence.doc_events.leave_application import (
+                        finalize_system_leave_application,
+                    )
+
                     leave_application = frappe.new_doc("Leave Application")
                     leave_application.employee = self.employee
                     leave_application.leave_type = leave_type
@@ -291,14 +295,14 @@ def set_short_leave_count(self, method):
                     leave_application.to_date = self.attendance_date
                     leave_application.half_day = 1  # Set to 1 for half day
                     leave_application.half_day_date = self.attendance_date
-                    leave_application.status = "Approved"  # You may want to set this to "Open" or another status
                     leave_application.total_leave_days = 0.5  # Half day
                     leave_application.description = "Automatically created due to short leave deduction"
-                    
-                    
-                    # Save the leave application
-                    leave_application.insert()
-                    leave_application.submit()
+
+                    frappe.flags.ignore_72_hour_leave_window = True
+                    try:
+                        leave_application = finalize_system_leave_application(leave_application)
+                    finally:
+                        frappe.flags.ignore_72_hour_leave_window = False
                     
                     
                     # Link the leave application to the attendance record

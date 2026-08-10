@@ -223,7 +223,10 @@ scheduler_events = {
         ],
         "0 4 * * THU": [
 			"valence.api.sales_invoice_payment_remainder",
-		]
+		],
+        "0 1 1 1,4,7,10 *": [
+            "valence.valence.tasks.leave_balance_update.run_quarterly_leave_balance_update",
+        ]
     }
 }
 

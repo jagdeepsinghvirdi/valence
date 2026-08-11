@@ -131,13 +131,14 @@ after_migrate = ["valence.valence.setup.leave_workflow.after_migrate"]
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+# #5 Department-wise Leave Access Control
+permission_query_conditions = {
+	"Leave Application": "valence.valence.override.query.leave_application_query",
+}
+
+has_permission = {
+	"Leave Application": "valence.valence.override.query.leave_application_has_permission",
+}
 
 # DocType Class
 # ---------------

@@ -334,6 +334,9 @@ def _ensure_test_actors():
 	_ensure_user(HOD_USER, "E2E", "HOD", ["Employee", "Leave Approver"])
 	_ensure_user(SUPER_HOD_USER, "E2E", "SuperHOD", ["Employee", "Super HOD"])
 
+	# Shared department so HOD list/form access works with #5 dept scoping
+	dept = _ensure_department("E2E Leave Dept", company)
+
 	# Employees
 	emp = _ensure_employee("E2E Employee", EMP_USER, company, holiday_list=holiday_list)
 	hod = _ensure_employee("E2E HOD", HOD_USER, company, holiday_list=holiday_list)
@@ -343,15 +346,17 @@ def _ensure_test_actors():
 	frappe.db.set_value("Employee", emp, "leave_approver", HOD_USER)
 	frappe.db.set_value("Employee", emp, "user_id", EMP_USER)
 	frappe.db.set_value("Employee", emp, "holiday_list", holiday_list)
+	frappe.db.set_value("Employee", emp, "department", dept)
 	frappe.db.set_value("Employee", hod, "user_id", HOD_USER)
 	frappe.db.set_value("Employee", hod, "holiday_list", holiday_list)
+	frappe.db.set_value("Employee", hod, "department", dept)
 	frappe.db.set_value("Employee", super_emp, "user_id", SUPER_HOD_USER)
 	frappe.db.set_value("Employee", super_emp, "holiday_list", holiday_list)
 
 	frappe.db.commit()
 	return {
-		"employee": {"user": EMP_USER, "employee": emp},
-		"hod": {"user": HOD_USER, "employee": hod},
+		"employee": {"user": EMP_USER, "employee": emp, "department": dept},
+		"hod": {"user": HOD_USER, "employee": hod, "department": dept},
 		"super_hod": {"user": SUPER_HOD_USER, "employee": super_emp},
 	}
 
@@ -466,6 +471,24 @@ def _ensure_leave_type_and_allocation(employee):
 	return leave_type
 
 
+def _ensure_department(name, company):
+	existing = frappe.db.get_value("Department", {"department_name": name, "company": company}, "name")
+	if existing:
+		return existing
+	if frappe.db.exists("Department", name):
+		return name
+	doc = frappe.get_doc(
+		{
+			"doctype": "Department",
+			"department_name": name,
+			"company": company,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
+	return doc.name
+
+
 def _new_leave(employee, leave_type, days, description, start_offset=None):
 	"""Create leave draft as Administrator (ignore 72h); employee will Apply.
 
@@ -478,6 +501,10 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 	from_date = add_days(getdate(), start_offset)
 	to_date = add_days(from_date, max(days - 1, 0))
 
+	emp_fields = frappe.db.get_value(
+		"Employee", employee, ["leave_approver", "department"], as_dict=True
+	) or frappe._dict()
+
 	doc = frappe.get_doc(
 		{
 			"doctype": "Leave Application",
@@ -487,6 +514,8 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 			"to_date": to_date,
 			"description": description,
 			"status": "Open",
+			"leave_approver": emp_fields.leave_approver or HOD_USER,
+			"department": emp_fields.department,
 		}
 	)
 

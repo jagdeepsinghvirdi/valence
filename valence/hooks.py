@@ -217,6 +217,9 @@ doc_events = {
     #   "on_cancel": "valence.valence.doc_events.attendance.cleanup_related_docs",
     #   "on_trash": "valence.valence.doc_events.attendance.cleanup_related_docs"      
   },
+  "Shift Assignment": {
+    "validate": "valence.valence.doc_events.shift_assignment.set_weekly_off_from_schedule"
+  },
   # Track B leave rules (shared file with Track A #8 — coordinate edits)
   "Leave Application": {
       "validate": "valence.valence.doc_events.leave_application.validate",
@@ -299,6 +302,7 @@ fixtures = [
 override_whitelisted_methods = {
 	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections",
 	"chemical.query.get_batch_no":"valence.valence.override.whitelisted_method.query.get_batch_no",
+	"hrms.api.roster.get_events": "valence.valence.override.whitelisted_method.roster.get_events",
 	# MariaDB 12+: bare to_date is TO_DATE(); backtick column in leave-period lookup
 	"hrms.hr.utils.get_leave_period": "valence.valence.override.leave_application.get_leave_period",
 }

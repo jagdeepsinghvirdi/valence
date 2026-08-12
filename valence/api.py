@@ -171,40 +171,18 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
 
     # Shift Assignment weekly off check
     shift_assignments = frappe.get_all(
-        "Shift Assignment",
-        filters={
-            "employee": employee,
-            "start_date": ["<=", date_obj]
-        },
-        fields=["custom_off_day", "end_date"]
-    )
+    "Shift Assignment",
+    filters={"employee": employee, "start_date": ["<=", date_obj]},
+    fields=["custom_off_day", "end_date"]
+)
+valid_shifts = [s for s in shift_assignments if not s.end_date or s.end_date >= date_obj]
 
-    valid_shifts = [
-        s for s in shift_assignments
-        if not s.end_date or s.end_date >= date_obj
-    ]
+if valid_shifts:
+    weekday = date_obj.strftime("%A")  # capitalized, matches Select options exactly
+    if valid_shifts[0].custom_off_day == weekday:
+        frappe.db.set_value("Attendance", attendance, {"status": "Weekly Off", "leave_type": None})
+        return {"attendance": attendance, "message": f"{attendance}: Marked as Weekly Off."}
 
-    if valid_shifts:
-        weekday = date_obj.strftime("%A")
-        if weekday == valid_shifts[0].custom_off_day:
-            frappe.db.set_value(
-                "Attendance",
-                attendance,
-                {
-                    "status": "Weekly Off",
-                    "leave_type": None
-                }
-            )
-            return {
-                "attendance": attendance,
-                "message": f"{attendance}: Marked as Weekly Off."
-            }
-
-    return {
-        "attendance": attendance,
-        "message": f"{attendance}: No check-in entries found."
-    }
-    
 # @frappe.whitelist()
 # def get_offday_status(employee, attendance_date,attendance):
     
@@ -240,33 +218,20 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
    
 #     # Step 2: Check Shift Assignment for weekly off
 
-#     shift_assignment = frappe.get_all(
-#     "Shift Assignment",
-#     filters={
-#         "employee": employee,
-#         "start_date": ["<=", date_obj],
-#     },
-#     fields=["name", "shift_type", "custom_off_day", "end_date"]
-#     )
+shift_assignment = frappe.get_all(
+    "Shift Assignment",
+    filters={"employee": employee, "start_date": ["<=", date_obj]},
+    fields=["name", "shift_type", "custom_off_day", "end_date"]
+)
+valid_shift_assignments = [s for s in shift_assignment if not s["end_date"] or s["end_date"] >= date_obj]
 
-#     valid_shift_assignments = []
-
-#     for shift in shift_assignment:
-#         if not shift["end_date"] or shift["end_date"] >= date_obj:
-#             valid_shift_assignments.append(shift)
-
-#     if valid_shift_assignments:
-#         weekday = date_obj.strftime('%A')
-#         emp_offday = valid_shift_assignments[0]["custom_off_day"]
-
-#         if weekday == emp_offday:
-#             if attendance:
-#                 frappe.db.set_value("Attendance", attendance, {
-#                     "status": "Weekly Off",
-#                     "leave_type": None
-#                 })
-#                 frappe.db.commit()
-#             return "Weekly Off"
+if valid_shift_assignments:
+    weekday = date_obj.strftime('%A')
+    if valid_shift_assignments[0]["custom_off_day"] == weekday:
+        if attendance:
+            frappe.db.set_value("Attendance", attendance, {"status": "Weekly Off", "leave_type": None})
+            frappe.db.commit()
+        return "Weekly Off"
 
 @frappe.whitelist()
 def get_offday_status(employee, attendance_date, attendance):
@@ -322,10 +287,11 @@ def get_offday_status(employee, attendance_date, attendance):
             valid_shift_assignments.append(shift)
 
     if valid_shift_assignments:
-        weekday = date_obj.strftime('%A')
-        emp_offday = valid_shift_assignments[0]["custom_off_day"]
+        weekday = date_obj.strftime('%A').lower()
+        off_days_raw = valid_shift_assignments[0]["custom_off_day"] or ""
+        off_days = [d.strip().lower() for d in off_days_raw.split(",") if d.strip()]
 
-        if weekday == emp_offday:
+        if weekday in off_days:
             if attendance:
                 frappe.db.set_value("Attendance", attendance, {
                     "status": "Weekly Off",

@@ -287,7 +287,7 @@ fixtures = [
 override_whitelisted_methods = {
 	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections",
 	"chemical.query.get_batch_no":"valence.valence.override.whitelisted_method.query.get_batch_no",
-	"hrms.api.roster.get_events": "valence.valence.override.whitelisted_method.roster.get_events",,
+	"hrms.api.roster.get_events": "valence.valence.override.whitelisted_method.roster.get_events",
 	# MariaDB 12+: bare to_date is TO_DATE(); backtick column in leave-period lookup
 	"hrms.hr.utils.get_leave_period": "valence.valence.override.leave_application.get_leave_period",
 }

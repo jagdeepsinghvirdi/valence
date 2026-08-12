@@ -12,6 +12,8 @@ SUPER_HOD_STATE = "Pending Super HOD Approval"
 def validate(doc, method=None):
 	"""Leave Application validate — runs each rule in order."""
 	validate_72_hour_window(doc, method)
+	validate_no_leave_on_present_day(doc, method)
+	validate_resigned_employee_leave_type(doc, method)
 	sync_leave_status_from_workflow(doc, method)
 
 
@@ -73,6 +75,86 @@ def validate_72_hour_window(doc, method=None):
 				"Please choose a later start date or contact HR."
 			).format(formatdate(doc.from_date)),
 			title=_("72-Hour Notice Required"),
+		)
+
+
+def validate_no_leave_on_present_day(doc, method=None):
+	"""
+	#10 Leave on Present Day Restriction (Track B)
+
+	Employees cannot apply leave for dates already marked Present in Attendance.
+	HR roles can override.
+	"""
+	if getattr(frappe.flags, "ignore_present_day_leave_restriction", False):
+		return
+
+	if _is_hr_user():
+		return
+
+	if not doc.employee or not doc.from_date or not doc.to_date:
+		return
+
+	present_dates = frappe.get_all(
+		"Attendance",
+		filters={
+			"employee": doc.employee,
+			"attendance_date": ["between", [doc.from_date, doc.to_date]],
+			"status": "Present",
+			"docstatus": 1,
+		},
+		pluck="attendance_date",
+		order_by="attendance_date asc",
+	)
+
+	if not present_dates:
+		return
+
+	dates_str = ", ".join(formatdate(d) for d in present_dates)
+	frappe.throw(
+		_(
+			"Leave cannot be applied for date(s) already marked Present in Attendance: {0}. "
+			"Please contact HR if you need to change this."
+		).format(dates_str),
+		title=_("Present Day Conflict"),
+	)
+
+
+ALLOWED_RESIGNED_LEAVE_TYPES = frozenset({"Leave Without Pay", "Sick Leave"})
+
+
+def validate_resigned_employee_leave_type(doc, method=None):
+	"""
+	#11 Resignation Option (Track B)
+
+	Resigned / relieved employees may only apply LWP or Sick Leave.
+	HR roles can override.
+	"""
+	if getattr(frappe.flags, "ignore_resigned_leave_type_check", False):
+		return
+
+	if _is_hr_user():
+		return
+
+	if not doc.employee or not doc.leave_type:
+		return
+
+	emp = frappe.db.get_value(
+		"Employee", doc.employee, ["status", "relieving_date"], as_dict=True
+	)
+	if not emp:
+		return
+
+	is_resigned = emp.status == "Left" or bool(emp.relieving_date)
+	if not is_resigned:
+		return
+
+	if doc.leave_type not in ALLOWED_RESIGNED_LEAVE_TYPES:
+		frappe.throw(
+			_(
+				"Resigned employees can only apply for Leave Without Pay or Sick Leave. "
+				"Selected leave type: {0}."
+			).format(frappe.bold(doc.leave_type)),
+			title=_("Leave Type Not Allowed"),
 		)
 
 

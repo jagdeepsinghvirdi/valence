@@ -1,5 +1,5 @@
 (() => {
-  // ../valence/valence/public/js/transaction.js
+  // ../../../../Documents/techno/valence/valence/public/js/transaction.js
   erpnext.TransactionController = class TransactionController extends erpnext.TransactionController {
     make_quality_inspection() {
       let data = [];
@@ -152,4 +152,4 @@
     }
   };
 })();
-//# sourceMappingURL=valence.bundle.XSVZX7KP.js.map
+//# sourceMappingURL=valence.bundle.F54GPX4N.js.map

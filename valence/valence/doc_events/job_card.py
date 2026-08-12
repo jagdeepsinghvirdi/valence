@@ -16,13 +16,14 @@ def on_submit(self,method):
 				row.db_set("time_difference",time_diff)
 
 def before_submit(self, method):
-	work_order = frappe.get_doc("Work Order", self.work_order)
-	work_order.db_set("disable_auto_update" , 1)
-	work_order.save(ignore_permissions=True)
+	# Prefer db_set over full WO save: Work Order carries Chemical child tables
+	# (e.g. Work Order Finish Item). Full save requires that app on the bench and
+	# is unnecessary to flip a single flag.
+	if self.work_order:
+		frappe.db.set_value("Work Order", self.work_order, "disable_auto_update", 1, update_modified=False)
 
 def after_submit(self, method):
-	work_order = frappe.get_doc("Work Order", self.work_order)
-	if work_order.disable_auto_update:
-		work_order.db_set("disable_auto_update" , 0)
-		work_order.save(ignore_permissions=True)
-		work_order.reload()
+	if not self.work_order:
+		return
+	if frappe.db.get_value("Work Order", self.work_order, "disable_auto_update"):
+		frappe.db.set_value("Work Order", self.work_order, "disable_auto_update", 0, update_modified=False)

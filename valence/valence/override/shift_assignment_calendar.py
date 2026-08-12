@@ -100,7 +100,7 @@ def get_shift_events(assignments: list[dict], company=None) -> list[dict]:
             event_title = f"{cstr(d.employee_name)}: {cstr(d.shift_type)}"
 
             # If it's an off day, change color to orange
-            if daily_event_start.strftime("%A").lower() in off_days:
+            if daily_event_start.strftime("%A") == d.custom_off_day:
                 event_color = "#ffd1b3"
 
             # If it's a holiday, change color to green and show holiday description

@@ -203,6 +203,9 @@ doc_events = {
       "on_update_after_submit": "valence.valence.doc_events.attendance.set_short_leave_count"
     #   "on_cancel": "valence.valence.doc_events.attendance.cleanup_related_docs",
     #   "on_trash": "valence.valence.doc_events.attendance.cleanup_related_docs"      
+  },
+  "Shift Assignment": {
+    "validate": "valence.valence.doc_events.shift_assignment.set_weekly_off_from_schedule"
   }
 
 }
@@ -242,7 +245,8 @@ fixtures = [
 #
 override_whitelisted_methods = {
 	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections",
-	"chemical.query.get_batch_no":"valence.valence.override.whitelisted_method.query.get_batch_no"
+	"chemical.query.get_batch_no":"valence.valence.override.whitelisted_method.query.get_batch_no",
+	"hrms.api.roster.get_events": "valence.valence.override.whitelisted_method.roster.get_events",
 }
 #
 # each overriding function accepts a `data` argument;

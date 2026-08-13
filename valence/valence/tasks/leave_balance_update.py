@@ -36,15 +36,17 @@ def run_quarterly_leave_balance_update():
 	)
 
 	for employee in employees:
-		working_days = get_working_days_for_quarter(employee.name, quarter_start, quarter_end)
-
-		if working_days is None:
-			working_days = get_manual_working_days(employee.name, quarter_start, quarter_end)
-
-		if working_days is None:
-			continue
+		auto_working_days = get_working_days_for_quarter(employee.name, quarter_start, quarter_end)
 
 		for leave_type in leave_types:
+			working_days = auto_working_days
+			if working_days is None:
+				working_days = get_manual_working_days(
+					employee.name, leave_type.name, quarter_start, quarter_end
+				)
+			if working_days is None:
+				continue
+
 			credit_leave_for_employee(
 				employee=employee.name,
 				company=employee.company,
@@ -85,6 +87,7 @@ def get_manual_working_days(employee, start_date, end_date):
 		"Quarterly Working Days",
 		{
 			"employee": employee,
+			"leave_type": leave_type,
 			"quarter_start_date": start_date,
 			"quarter_end_date": end_date,
 		},

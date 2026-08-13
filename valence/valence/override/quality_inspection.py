@@ -1,7 +1,15 @@
 import frappe
-from chemical.chemical.override.doctype.quality_inspection import QualityInspection as _QualityInspection
 from frappe import _ 
 from frappe.utils import cint, cstr, flt, get_link_to_form, get_number_format_info
+
+try:
+	from chemical.chemical.override.doctype.quality_inspection import (
+		QualityInspection as _QualityInspection,
+	)
+except ModuleNotFoundError:
+	from erpnext.stock.doctype.quality_inspection.quality_inspection import (
+		QualityInspection as _QualityInspection,
+	)
 
 
 class QualityInspection(_QualityInspection):

@@ -236,7 +236,7 @@
   "columns": 0,
   "default": "0",
   "depends_on": null,
-  "description": "If enabled, Stock Entry can be saved even when the Yield Based On item is missing from raw materials. Skips the chemical app check: Based on Item Required in Raw Materials.",
+  "description": "If enabled, always skip chemical Based On raw-material check. If disabled: Based On check is skipped when the Stock Entry already has at least one item row; otherwise chemical default applies.",
   "docstatus": 0,
   "doctype": "Custom Field",
   "dt": "Manufacturing Settings",

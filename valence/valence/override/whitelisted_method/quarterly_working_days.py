@@ -74,6 +74,7 @@ def bulk_create_quarterly_working_days(entries, company, quarter_start_date, qua
 				"is_manual_entry": 1,
 			}).insert()
 			created.append(employee)
+
 	return {
 		"created_count": len(created),
 		"updated_count": len(updated),

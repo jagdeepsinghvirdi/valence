@@ -1,4 +1,3 @@
-from chemical.chemical.override.doctype.stock_entry import StockEntry as _StockEntry
 import frappe
 from erpnext.stock.doctype.stock_entry.stock_entry import get_available_materials
 from frappe.utils import (
@@ -16,6 +15,12 @@ from collections import defaultdict
 from frappe import _, bold
 from erpnext.controllers.stock_controller import BatchExpiredError
 
+try:
+	# Cloud / full chemical app
+	from chemical.chemical.override.doctype.stock_entry import StockEntry as _StockEntry
+except ModuleNotFoundError:
+	# Local bench without full chemical override package
+	from erpnext.stock.doctype.stock_entry.stock_entry import StockEntry as _StockEntry
 
 
 class StockEntry(_StockEntry):

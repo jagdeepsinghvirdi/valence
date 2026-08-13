@@ -98,7 +98,11 @@ jinja = {
 
 # before_install = "valence.install.before_install"
 # after_install = "valence.install.after_install"
-after_migrate = ["valence.valence.setup.leave_workflow.after_migrate"]
+after_migrate = [
+	"valence.valence.setup.leave_workflow.after_migrate",
+	"valence.valence.setup.od_wfh_workflow.after_migrate",
+	"valence.valence.monkey_patch.chemical_stock_entry.after_migrate",
+]
 
 # Uninstallation
 # ------------
@@ -223,12 +227,23 @@ doc_events = {
       "before_submit": "valence.valence.doc_events.leave_application.before_submit",
       "on_update": "valence.valence.doc_events.leave_application.on_update",
   },
+  # #7 OD/WFH via Attendance Request
+  "Attendance Request": {
+      "before_insert": "valence.valence.doc_events.attendance_request.before_insert",
+      "validate": "valence.valence.doc_events.attendance_request.validate",
+      "on_update": "valence.valence.doc_events.attendance_request.on_update",
+  },
 
 }
 
 from erpnext.stock.serial_batch_bundle import SerialBatchCreation
 from valence.valence.monkey_patch.serial_batch_bundle import create_batch
 SerialBatchCreation.create_batch = create_batch
+
+# Optional Manufacturing Settings: skip chemical "Based on Item Required in Raw Materials"
+from valence.valence.monkey_patch.chemical_stock_entry import apply_based_on_item_optional_patch
+
+apply_based_on_item_optional_patch()
 # Scheduled Tasks
 # --------------
 
@@ -277,7 +292,7 @@ fixtures = [
     },
     {
         "dt": "Workflow",
-        "filters": [["name", "in", ["Leave Application Approval"]]],
+        "filters": [["name", "in", ["Leave Application Approval", "OD WFH Request Approval"]]],
     },
 ]
 # Testing
@@ -314,7 +329,9 @@ override_whitelisted_methods = {
 
 # Request Events
 # ----------------
-# before_request = ["valence.utils.before_request"]
+before_request = [
+	"valence.valence.monkey_patch.chemical_stock_entry.apply_based_on_item_optional_patch",
+]
 # after_request = ["valence.utils.after_request"]
 
 # Job Events

@@ -66,8 +66,7 @@
   },
   {
    "fieldname": "column_break_mlcl",
-   "fieldtype": "Column Break",
-   "options": "leave type"
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "leave_type",

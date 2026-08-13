@@ -1,14 +1,8 @@
-"""Chemical Stock Entry based-on validation — skip when items already exist.
+"""Chemical Stock Entry based-on handling when Based On item is omitted.
 
-Chemical default:
-  Based on Item <item> Required in Raw Materials
-
-Valence rule:
-  - If the Stock Entry has at least one item row with item_code → skip based-on check
-    (save allowed without Based On item in raw materials).
-  - If items are empty → keep chemical behaviour.
-
-Manufacturing Settings → Make Based On Item Optional still skips the check entirely.
+1) check_based_on_item — skip when SE already has any item rows (or Settings flag ON).
+2) cal_target_yield_cons — skip yield calc when based_on item is not on the SE
+   (avoids KeyError: based_on after check is skipped).
 """
 
 from __future__ import annotations
@@ -33,7 +27,8 @@ def ensure_based_on_item_optional_field():
 					"description": (
 						"If enabled, always skip chemical Based On raw-material validation. "
 						"When disabled: Based On check is skipped automatically if the Stock Entry "
-						"already has at least one item row; otherwise chemical default applies."
+						"already has at least one item row; yield calc is also skipped when Based On "
+						"item is missing from items."
 					),
 					"module": "Valence",
 				}
@@ -45,16 +40,19 @@ def ensure_based_on_item_optional_field():
 
 
 def apply_based_on_item_optional_patch():
-	"""Wrap chemical check_based_on_item so Based On is optional when items exist."""
+	"""Wrap chemical based-on validate + yield helpers for optional Based On item."""
 	try:
 		from chemical.chemical.override.doc_event import stock_entry as chem_se
 	except ImportError:
 		return
 
-	# Bump flag when wrapper logic changes
+	_patch_check_based_on_item(chem_se)
+	_patch_cal_target_yield_cons(chem_se)
+
+
+def _patch_check_based_on_item(chem_se):
 	if getattr(chem_se, "_valence_based_on_any_item_patched", False):
 		return
-
 	if not hasattr(chem_se, "check_based_on_item"):
 		return
 
@@ -63,15 +61,32 @@ def apply_based_on_item_optional_patch():
 	def check_based_on_item(doc):
 		if _is_based_on_item_optional():
 			return
-		# Any item line present → do not require Based On item in raw materials
 		if _has_any_item_row(doc):
 			return
 		return _original(doc)
 
 	chem_se.check_based_on_item = check_based_on_item
 	chem_se._valence_based_on_any_item_patched = True
-	chem_se._valence_based_on_consumption_patched = True
-	chem_se._valence_based_on_optional_patched = True
+
+
+def _patch_cal_target_yield_cons(chem_se):
+	"""Avoid KeyError when based_on item is not in SE items (after optional skip)."""
+	if getattr(chem_se, "_valence_cal_target_yield_safe_patched", False):
+		return
+	if not hasattr(chem_se, "cal_target_yield_cons"):
+		return
+
+	_original = chem_se.cal_target_yield_cons
+
+	def cal_target_yield_cons(doc):
+		based_on = (doc.get("based_on") or "").strip()
+		if based_on and not _item_on_stock_entry(doc, based_on):
+			# Based On omitted from items — cannot compute batch_yield from it
+			return
+		return _original(doc)
+
+	chem_se.cal_target_yield_cons = cal_target_yield_cons
+	chem_se._valence_cal_target_yield_safe_patched = True
 
 
 def _is_based_on_item_optional() -> bool:
@@ -86,6 +101,13 @@ def _is_based_on_item_optional() -> bool:
 def _has_any_item_row(doc) -> bool:
 	for row in doc.get("items") or []:
 		if row.get("item_code"):
+			return True
+	return False
+
+
+def _item_on_stock_entry(doc, item_code: str) -> bool:
+	for row in doc.get("items") or []:
+		if row.get("item_code") == item_code:
 			return True
 	return False
 

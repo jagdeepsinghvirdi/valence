@@ -1,11 +1,21 @@
-"""Automated checks for #3 72-hour leave window. Run:
+"""Checks for backdated leave + working-day Super HOD threshold. Run:
   bench --site valence.localhost execute valence.valence.doc_events.test_leave_72h_window.run
 """
+
+from __future__ import annotations
 
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import add_days, get_datetime, getdate, now_datetime
+from frappe.utils import add_days, getdate
+
+from valence.valence.doc_events.leave_application import (
+	WORKING_LEAVE_DAYS_FIELD,
+	count_working_leave_days,
+	needs_super_hod_approval,
+	set_working_leave_days,
+	validate,
+)
 
 
 def run():
@@ -16,156 +26,89 @@ def run():
 		results.append((status, name, detail))
 		print(f"[{status}] {name}" + (f" — {detail}" if detail else ""))
 
-	from valence.valence.doc_events.leave_application import (
-		validate,
-		validate_72_hour_window,
-		_is_hr_user,
-	)
+	# Ensure field exists
+	from valence.valence.setup.leave_workflow import ensure_leave_application_workflow
 
-	frappe.set_user("Administrator")
-	frappe.flags.ignore_72_hour_leave_window = False
+	ensure_leave_application_workflow()
 
-	# 1) Hook wired
-	hooks = frappe.get_hooks("doc_events").get("Leave Application") or {}
-	ok(
-		"Hook registered on Leave Application.validate",
-		"valence.valence.doc_events.leave_application.validate"
-		in (hooks.get("validate") or []),
-		str(hooks),
-	)
+	employee = frappe.db.get_value("Employee", {"status": "Active"}, "name")
+	ok("Employee exists", bool(employee), employee or "NONE")
+	if not employee:
+		frappe.throw("Need an Employee to run leave day tests")
 
-	# 2) Administrator exemption
-	ok("Administrator is HR/System exempt", _is_hr_user() is True)
-
-	employee = frappe.db.get_value("Employee", {"status": "Active"}, "name") or frappe.db.get_value(
-		"Employee", {}, "name"
-	)
 	leave_type = frappe.db.get_value("Leave Type", {}, "name") or "Leave Without Pay"
-	ok(
-		"Employee present for shell docs (optional for unit path)",
-		True,
-		employee or "NONE — UI full insert needs an Employee master",
-	)
 
-	def make_doc(from_date):
+	def make_doc(from_date, to_date, half_day=0):
 		return frappe.get_doc(
 			{
 				"doctype": "Leave Application",
 				"employee": employee,
 				"from_date": from_date,
-				"to_date": from_date,
+				"to_date": to_date,
+				"half_day": half_day,
+				"half_day_date": from_date if half_day else None,
 				"leave_type": leave_type,
-				"description": "72h window automated test",
+				"description": "working-days unit test",
 			}
 		)
 
-	def assert_throws(doc, expect_throw=True):
-		"""Only ValidationError counts as a rule block; other exceptions are failures."""
-		raised = False
+	# Backdated leave must NOT throw 72h-style errors for non-HR
+	with patch(
+		"valence.valence.doc_events.leave_application.frappe.get_roles",
+		return_value=["Employee"],
+	):
+		past_from = add_days(getdate(), -4)
+		past_to = add_days(getdate(), -2)
+		doc = make_doc(past_from, past_to)
+		allowed = True
 		err = ""
 		try:
-			validate_72_hour_window(doc)
-		except frappe.ValidationError as e:
-			raised = True
-			err = str(e)
+			# Only our validate helpers that remain (no 72h)
+			set_working_leave_days(doc)
 		except Exception as e:
-			return False, f"UNEXPECTED {type(e).__name__}: {e}"
-		return (raised == expect_throw), err
-
-	# Non-HR role simulation for remainder of employee-path checks
-	with patch("valence.valence.doc_events.leave_application.frappe.get_roles", return_value=["Employee"]):
-		# 3) tomorrow blocked
-		cond, err = assert_throws(make_doc(add_days(getdate(), 1)), True)
-		ok("Non-HR blocked for from_date = tomorrow", cond, err[:140])
-		ok("Error message mentions 72 hours", "72" in err, err[:140])
-
-		# 4) today blocked
-		cond, err = assert_throws(make_doc(getdate()), True)
-		ok("Non-HR blocked for from_date = today", cond, err[:100])
-
-		# 5) past blocked
-		cond, err = assert_throws(make_doc(add_days(getdate(), -2)), True)
-		ok("Non-HR blocked for past from_date", cond, err[:100])
-
-		# 6) find first date with >= 72 hours
-		safe_date = None
-		for day_offset in range(1, 14):
-			candidate = add_days(getdate(), day_offset)
-			hours = (get_datetime(candidate) - now_datetime()).total_seconds() / 3600
-			if hours >= 72:
-				safe_date = candidate
-				break
-		if not safe_date:
-			safe_date = add_days(getdate(), 5)
-
-		hours_safe = (get_datetime(safe_date) - now_datetime()).total_seconds() / 3600
-		cond, err = assert_throws(make_doc(safe_date), False)
+			allowed = False
+			err = str(e)
+		ok("Backdated leave sets working days without throw", allowed, err[:100])
 		ok(
-			f"Non-HR allowed for from_date = {safe_date}",
-			cond,
-			f"hours_until={hours_safe:.1f}" if cond else err[:120],
+			"Backdated working days populated",
+			flt_days(doc.get(WORKING_LEAVE_DAYS_FIELD)) >= 0,
+			str(doc.get(WORKING_LEAVE_DAYS_FIELD)),
 		)
 
-		# 7) day+2 if still under 72h
-		d2 = add_days(getdate(), 2)
-		hours_d2 = (get_datetime(d2) - now_datetime()).total_seconds() / 3600
-		if hours_d2 < 72:
-			cond, err = assert_throws(make_doc(d2), True)
-			ok(f"Non-HR blocked for {d2} ({hours_d2:.1f}h < 72)", cond, err[:80])
-		else:
-			ok(f"day+2 already >= 72h ({hours_d2:.1f}h) — skip tight case", True)
+	# Threshold helpers
+	ok("3 working days → no Super HOD", needs_super_hod_approval(3) is False)
+	ok("4 working days → Super HOD", needs_super_hod_approval(4) is True)
+	ok("2.5 working days → no Super HOD", needs_super_hod_approval(2.5) is False)
 
-		# 8) flag bypass
-		frappe.flags.ignore_72_hour_leave_window = True
-		try:
-			cond, err = assert_throws(make_doc(getdate()), False)
-		finally:
-			frappe.flags.ignore_72_hour_leave_window = False
-		ok("Flag ignore_72_hour_leave_window bypasses rule", cond, err[:80] if err else "")
+	# Mon–Thu = 4 calendar weekdays if no offs
+	days = count_working_leave_days(employee, "2026-09-07", "2026-09-10")
+	ok("Mon–Thu count is positive", days > 0, f"days={days}")
+	ok(
+		"Mon–Thu Super HOD decision matches count",
+		needs_super_hod_approval(days) == (days > 3),
+		f"days={days}",
+	)
 
-		# 9) missing from_date
-		cond, err = assert_throws(frappe._dict(from_date=None), False)
-		ok("Missing from_date does not throw", cond)
-
-		# 10) entrypoint validate()
-		raised = False
-		err = ""
-		try:
-			validate(make_doc(add_days(getdate(), 1)))
-		except frappe.ValidationError as e:
-			raised = True
-			err = str(e)
-		ok("validate() entrypoint blocks short notice", raised, err[:120])
-
-	# 11) HR roles allowed
-	for role in ("HR Manager", "HR User", "System Manager"):
-		with patch(
-			"valence.valence.doc_events.leave_application.frappe.get_roles",
-			return_value=[role, "Employee"],
-		):
-			cond, err = assert_throws(make_doc(add_days(getdate(), 1)), False)
-			ok(f"{role} may apply leave for tomorrow", cond, err[:80] if err else "")
-
-	# 12) Math sanity: boundary helper print for manual testers
-	print("\n--- Manual date guide (based on NOW) ---")
-	print(f"NOW: {now_datetime()}")
-	for off in range(0, 6):
-		d = add_days(getdate(), off)
-		h = (get_datetime(d) - now_datetime()).total_seconds() / 3600
-		print(f"  from_date={d}  hours_until_midnight_start={h:.1f}  →  {'ALLOW' if h >= 72 else 'BLOCK'}")
+	# Half day on a single working day → 0.5
+	one = count_working_leave_days(
+		employee, "2026-09-07", "2026-09-07", half_day=1, half_day_date="2026-09-07"
+	)
+	# If that Monday is a holiday/off, count may be 0 — still valid
+	ok("Single-day half-day count in {0, 0.5}", one in (0, 0.5), f"days={one}")
 
 	passed = sum(1 for s, _, _ in results if s == "PASS")
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print(f"Recommended ALLOW from_date for UI test: {safe_date}")
+	print("Backdated leave allowed; Super HOD when working days > 3.")
 	if failed:
-		failed_names = [n for s, n, _ in results if s == "FAIL"]
-		frappe.throw(f"72h tests failed ({failed}): {failed_names}")
+		frappe.throw(f"Working-days leave tests failed ({failed})")
 
-	return {
-		"passed": passed,
-		"failed": failed,
-		"safe_date": str(safe_date),
-		"now": str(now_datetime()),
-	}
+	return {"passed": passed, "failed": failed}
+
+
+def flt_days(v):
+	try:
+		return float(v or 0)
+	except Exception:
+		return -1

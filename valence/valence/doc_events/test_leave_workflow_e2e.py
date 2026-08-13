@@ -29,8 +29,9 @@ HOD_USER = "e2e.hod@valence.test"
 SUPER_HOD_USER = "e2e.superhod@valence.test"
 PASSWORD = "Test@Leave123"
 
-# Far enough to pass 72h rule when acting as Employee
+# Far enough / sized for working-day Super HOD tests (≤3 vs >3)
 FROM_OFFSET_DAYS = 10
+
 
 
 def run():
@@ -79,7 +80,7 @@ def run():
 		ok(
 			"Short: Apply → Pending HOD",
 			short.workflow_state == STATE_PENDING_HOD and short.status == "Open",
-			f"state={short.workflow_state} status={short.status} days={short.total_leave_days}",
+			f"state={short.workflow_state} status={short.status} working_days={short.get('custom_working_leave_days')}",
 		)
 
 		with _as_user(HOD_USER):
@@ -95,11 +96,11 @@ def run():
 			f"state={short.workflow_state} status={short.status} docstatus={short.docstatus}",
 		)
 
-		# ------ LONG LEAVE (>= 3 days): apply → HOD → Super HOD → Approved ------
+		# ------ LONG LEAVE (> 3 working days): apply → HOD → Super HOD → Approved ------
 		long = _new_leave(
 			actors["employee"]["employee"],
 			leave_type,
-			days=3,
+			days=4,
 			description="E2E long leave",
 			start_offset=FROM_OFFSET_DAYS + 15,
 		)
@@ -113,7 +114,7 @@ def run():
 		ok(
 			"Long: Apply → Pending HOD",
 			long.workflow_state == STATE_PENDING_HOD,
-			f"state={long.workflow_state} days={long.total_leave_days}",
+			f"state={long.workflow_state} working_days={long.get('custom_working_leave_days')}",
 		)
 
 		with _as_user(HOD_USER):
@@ -250,11 +251,7 @@ def run():
 		sys_leave.half_day_date = sys_leave.from_date
 		sys_leave.total_leave_days = 0.5
 		sys_leave.description = "E2E system short leave finalize"
-		frappe.flags.ignore_72_hour_leave_window = True
-		try:
-			sys_leave = finalize_system_leave_application(sys_leave)
-		finally:
-			frappe.flags.ignore_72_hour_leave_window = False
+		sys_leave = finalize_system_leave_application(sys_leave)
 		created_names.append(sys_leave.name)
 		sys_leave.reload()
 		ok(
@@ -490,15 +487,16 @@ def _ensure_department(name, company):
 
 
 def _new_leave(employee, leave_type, days, description, start_offset=None):
-	"""Create leave draft as Administrator (ignore 72h); employee will Apply.
+	"""Create leave draft; force custom_working_leave_days for workflow routing tests.
 
-	start_offset: days from today for from_date. Defaults to FROM_OFFSET_DAYS.
-	Use distinct offsets per leave to avoid HRMS overlap validation.
+	`days` here means intended working-day count for Super HOD threshold tests
+	(≤3 HOD-only, >3 Super HOD), not necessarily calendar span after holidays.
 	"""
 	if start_offset is None:
 		start_offset = FROM_OFFSET_DAYS
 
 	from_date = add_days(getdate(), start_offset)
+	# Use calendar span ~= days so HRMS is happy; then force working-days field
 	to_date = add_days(from_date, max(days - 1, 0))
 
 	emp_fields = frappe.db.get_value(
@@ -519,32 +517,20 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 		}
 	)
 
-	frappe.flags.ignore_72_hour_leave_window = True
-	try:
-		doc.insert(ignore_permissions=True)
-	finally:
-		frappe.flags.ignore_72_hour_leave_window = False
-
+	doc.insert(ignore_permissions=True)
 	doc.reload()
-	# If holidays reduce day count and we need long-leave path, force total_leave_days
-	if days >= 3 and float(doc.total_leave_days or 0) < 3:
-		frappe.db.set_value(
-			"Leave Application",
-			doc.name,
-			"total_leave_days",
-			float(days),
-			update_modified=False,
-		)
-		doc.reload()
-	elif days < 3 and float(doc.total_leave_days or 0) >= 3:
-		frappe.db.set_value(
-			"Leave Application",
-			doc.name,
-			"total_leave_days",
-			float(days),
-			update_modified=False,
-		)
-		doc.reload()
+
+	# Pin working-days field used by workflow conditions
+	frappe.db.set_value(
+		"Leave Application",
+		doc.name,
+		{
+			"custom_working_leave_days": float(days),
+			"total_leave_days": float(days),
+		},
+		update_modified=False,
+	)
+	doc.reload()
 	return doc
 
 

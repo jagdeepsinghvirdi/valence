@@ -1,14 +1,12 @@
 """
-#4 Extended Leave Approval Workflow (Track B)
+#3 / #4 Leave Application approval routing (Track B)
 
-Installs / updates:
-- Super HOD role
-- Workflow states & actions
-- Active Leave Application workflow:
-    Draft → Pending HOD Approval
-    HOD Approve (< 3 days)  → Approved
-    HOD Approve (≥ 3 days)  → Pending Super HOD Approval → Super HOD Approve → Approved
-    Reject from either pending state → Rejected
+- Backdated leave is allowed (employee can apply after returning to work).
+- Working leave days exclude holidays + week offs.
+- HOD Approve: ≤ 3 working days → Approved (normal / immediate path)
+- HOD Approve: > 3 working days → Pending Super HOD Approval → Super HOD Approve
+
+Installs / updates Super HOD role, workflow states/actions, and Leave Application workflow.
 """
 
 from __future__ import annotations
@@ -28,10 +26,12 @@ ROLE_SUPER_HOD = "Super HOD"
 
 ACTIONS = ("Apply", "Approve", "Reject")
 
-# total_leave_days is set on Leave Application by HRMS (half days as 0.5)
-# Use `or 0` so missing values do not block both Approve paths.
-COND_SHORT = "(doc.total_leave_days or 0) < 3"
-COND_LONG = "(doc.total_leave_days or 0) >= 3"
+WORKING_LEAVE_DAYS_FIELD = "custom_working_leave_days"
+
+# Workflow conditions use working days (holidays / week offs excluded).
+# ≤ 3 → normal HOD approval; > 3 → Super HOD also.
+COND_SHORT = f"(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) <= 3"
+COND_LONG = f"(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) > 3"
 
 
 def after_migrate():
@@ -41,12 +41,38 @@ def after_migrate():
 def ensure_leave_application_workflow():
 	"""Idempotent: safe to call on migrate and manually via bench execute."""
 	_ensure_roles()
+	_ensure_working_leave_days_field()
 	_ensure_workflow_states()
 	_ensure_workflow_actions()
 	_ensure_super_hod_permissions()
 	_ensure_workflow()
 	frappe.clear_cache()
 	frappe.db.commit()
+
+
+def _ensure_working_leave_days_field():
+	"""Custom field used by workflow conditions for Super HOD routing."""
+	if frappe.db.exists("Custom Field", {"dt": "Leave Application", "fieldname": WORKING_LEAVE_DAYS_FIELD}):
+		return
+
+	frappe.get_doc(
+		{
+			"doctype": "Custom Field",
+			"dt": "Leave Application",
+			"module": "Valence",
+			"label": "Working Leave Days",
+			"fieldname": WORKING_LEAVE_DAYS_FIELD,
+			"fieldtype": "Float",
+			"precision": "1",
+			"insert_after": "total_leave_days",
+			"read_only": 1,
+			"description": (
+				"Working days in leave period excluding holidays and week offs. "
+				"≤ 3 → HOD only; > 3 → Super HOD approval also required. "
+				"Backdated leave is allowed."
+			),
+		}
+	).insert(ignore_permissions=True)
 
 
 def _ensure_roles():
@@ -151,7 +177,7 @@ def _ensure_workflow():
 			0,
 			ROLE_SUPER_HOD,
 			"Open",
-			"Awaiting Super HOD (leave of 3+ days)",
+			"Awaiting Super HOD (leave > 3 working days)",
 		),
 		_state_row(STATE_APPROVED, 1, "HR Manager", "Approved", "Leave approved"),
 		_state_row(STATE_REJECTED, 1, "HR Manager", "Rejected", "Leave rejected"),

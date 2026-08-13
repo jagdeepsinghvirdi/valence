@@ -1,4 +1,3 @@
-from chemical.chemical.override.doctype.batch import Batch as _Batch
 import frappe
 from frappe.utils import nowdate
 from frappe.model.naming import make_autoname
@@ -6,6 +5,11 @@ from frappe import _
 from erpnext.stock.doctype.batch.batch import batch_uses_naming_series,get_name_from_hash,_get_batch_prefix,_make_naming_series_key
 from datetime import datetime
 from frappe.utils.jinja import render_template
+
+try:
+	from chemical.chemical.override.doctype.batch import Batch as _Batch
+except ModuleNotFoundError:
+	from erpnext.stock.doctype.batch.batch import Batch as _Batch
 
 
 class Batch(_Batch):

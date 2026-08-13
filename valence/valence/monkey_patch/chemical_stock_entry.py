@@ -1,11 +1,14 @@
-"""Optional bypass for chemical Stock Entry based-on raw-material validation.
+"""Chemical Stock Entry based-on validation — skip when items already exist.
 
-Chemical validates on SE save:
+Chemical default:
   Based on Item <item> Required in Raw Materials
-(see chemical.chemical.override.doc_event.stock_entry.check_based_on_item)
 
-Manufacturing Settings → Make Based On Item Optional (custom_based_on_item_optional)
-skips that check so the entry can still be saved when process allows it.
+Valence rule:
+  - If the Stock Entry has at least one item row with item_code → skip based-on check
+    (save allowed without Based On item in raw materials).
+  - If items are empty → keep chemical behaviour.
+
+Manufacturing Settings → Make Based On Item Optional still skips the check entirely.
 """
 
 from __future__ import annotations
@@ -28,8 +31,9 @@ def ensure_based_on_item_optional_field():
 					"insert_after": "custom_job_card_over_lap_time_not_required",
 					"default": "0",
 					"description": (
-						"If enabled, Stock Entry can be saved even when the Yield Based On item "
-						"is missing from raw materials (skips chemical based-on validation)."
+						"If enabled, always skip chemical Based On raw-material validation. "
+						"When disabled: Based On check is skipped automatically if the Stock Entry "
+						"already has at least one item row; otherwise chemical default applies."
 					),
 					"module": "Valence",
 				}
@@ -41,13 +45,14 @@ def ensure_based_on_item_optional_field():
 
 
 def apply_based_on_item_optional_patch():
-	"""Wrap chemical check_based_on_item so the Manufacturing Settings flag is respected."""
+	"""Wrap chemical check_based_on_item so Based On is optional when items exist."""
 	try:
 		from chemical.chemical.override.doc_event import stock_entry as chem_se
 	except ImportError:
 		return
 
-	if getattr(chem_se, "_valence_based_on_optional_patched", False):
+	# Bump flag when wrapper logic changes
+	if getattr(chem_se, "_valence_based_on_any_item_patched", False):
 		return
 
 	if not hasattr(chem_se, "check_based_on_item"):
@@ -58,9 +63,14 @@ def apply_based_on_item_optional_patch():
 	def check_based_on_item(doc):
 		if _is_based_on_item_optional():
 			return
+		# Any item line present → do not require Based On item in raw materials
+		if _has_any_item_row(doc):
+			return
 		return _original(doc)
 
 	chem_se.check_based_on_item = check_based_on_item
+	chem_se._valence_based_on_any_item_patched = True
+	chem_se._valence_based_on_consumption_patched = True
 	chem_se._valence_based_on_optional_patched = True
 
 
@@ -70,8 +80,14 @@ def _is_based_on_item_optional() -> bool:
 			frappe.db.get_single_value("Manufacturing Settings", "custom_based_on_item_optional") or 0
 		)
 	except Exception:
-		# Field not migrated yet, or transient DB error — keep chemical rule strict
 		return False
+
+
+def _has_any_item_row(doc) -> bool:
+	for row in doc.get("items") or []:
+		if row.get("item_code"):
+			return True
+	return False
 
 
 def after_migrate():

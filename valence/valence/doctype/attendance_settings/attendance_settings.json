@@ -8,7 +8,9 @@
   "section_break_fptb",
   "use_late_coming_rules",
   "short_leave_logic",
-  "short_leave_in_month"
+  "short_leave_in_month",
+  "leave_approval_section",
+  "super_hod_working_days_threshold"
  ],
  "fields": [
   {
@@ -32,13 +34,27 @@
    "fieldname": "use_late_coming_rules",
    "fieldtype": "Check",
    "label": "Use Late Coming Rules"
+  },
+  {
+   "fieldname": "leave_approval_section",
+   "fieldtype": "Section Break",
+   "label": "Leave Approval"
+  },
+  {
+   "default": "3",
+   "description": "Working days (holidays and week offs excluded). Leave with working days up to this value needs only HOD approval. More than this also needs Super HOD. Change anytime — default 3.",
+   "fieldname": "super_hod_working_days_threshold",
+   "fieldtype": "Int",
+   "label": "Super HOD After Working Days",
+   "non_negative": 1,
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-04-21 15:33:15.670995",
+ "modified": "2026-08-13 17:00:00.000000",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Attendance Settings",
@@ -51,6 +67,30 @@
    "print": 1,
    "read": 1,
    "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Super HOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Leave Approver",
    "share": 1,
    "write": 1
   }

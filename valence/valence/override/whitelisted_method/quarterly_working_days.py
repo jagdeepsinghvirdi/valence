@@ -1,7 +1,7 @@
 import frappe
 from frappe import _
 from valence.valence.tasks.leave_balance_update import get_working_days_for_quarter
-
+from valence.valence.tasks.leave_balance_update import get_working_days_for_quarter, credit_leave_for_employee
 
 @frappe.whitelist()
 def get_working_days_preview(company, quarter_start_date, quarter_end_date):
@@ -29,17 +29,14 @@ def get_working_days_preview(company, quarter_start_date, quarter_end_date):
 
 @frappe.whitelist()
 def bulk_create_quarterly_working_days(entries, company, quarter_start_date, quarter_end_date, leave_type):
-	"""
-	Create/update a Quarterly Working Days record for each employee in one go.
-	entries: JSON list of {"employee": "...", "working_days": <number>}
-	company, quarter_start_date, quarter_end_date, leave_type: shared across all entries
-	"""
 	if isinstance(entries, str):
 		entries = frappe.parse_json(entries)
 	if not entries:
 		frappe.throw(_("Please provide at least one employee with working days."))
 	if not leave_type:
 		frappe.throw(_("Please select a Leave Type."))
+
+	divisor = frappe.db.get_value("Leave Type", leave_type, "custom_working_days_per_leave")
 
 	created = []
 	updated = []
@@ -58,10 +55,18 @@ def bulk_create_quarterly_working_days(entries, company, quarter_start_date, qua
 			},
 		)
 		if existing_name:
-			# Already have an entry for this employee/leave_type/quarter -
-			# update it rather than creating a duplicate.
 			frappe.db.set_value("Quarterly Working Days", existing_name, "working_days", working_days)
 			updated.append(employee)
+			if divisor:
+				credit_leave_for_employee(
+					employee=employee,
+					company=company or frappe.db.get_value("Employee", employee, "company"),
+					leave_type=leave_type,
+					divisor=divisor,
+					working_days=working_days,
+					quarter_start=quarter_start_date,
+					quarter_end=quarter_end_date,
+				)
 		else:
 			frappe.get_doc({
 				"doctype": "Quarterly Working Days",
@@ -72,7 +77,7 @@ def bulk_create_quarterly_working_days(entries, company, quarter_start_date, qua
 				"quarter_end_date": quarter_end_date,
 				"working_days": working_days,
 				"is_manual_entry": 1,
-			}).insert()
+			}).insert()  # on_update hook fires credit_leave_from_qwd automatically
 			created.append(employee)
 
 	return {

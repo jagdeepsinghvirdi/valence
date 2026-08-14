@@ -64,13 +64,41 @@ def run():
 	long = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4})
 	half = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 0.5})
 
-	ok("COND_SHORT true for 3 working days", eval_cond(COND_SHORT, short) is True)
-	ok("COND_SHORT false for 4 working days", eval_cond(COND_SHORT, long) is False)
-	ok("COND_LONG true for 4 working days", eval_cond(COND_LONG, long) is True)
-	ok("COND_LONG false for 3 working days", eval_cond(COND_LONG, short) is False)
+	from valence.valence.setup.leave_workflow import (
+		get_super_hod_working_days_threshold,
+		SETTINGS_DOCTYPE,
+		THRESHOLD_FIELD,
+	)
+
+	# Pin threshold=3 for condition checks, then restore
+	prev = frappe.db.get_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD)
+	frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, 3)
+
+	ok("COND_SHORT true for 3 working days (threshold 3)", eval_cond(COND_SHORT, short) is True)
+	ok("COND_SHORT false for 4 working days (threshold 3)", eval_cond(COND_SHORT, long) is False)
+	ok("COND_LONG true for 4 working days (threshold 3)", eval_cond(COND_LONG, long) is True)
+	ok("COND_LONG false for 3 working days (threshold 3)", eval_cond(COND_LONG, short) is False)
 	ok("COND_SHORT true for half day", eval_cond(COND_SHORT, half) is True)
-	ok("needs_super_hod False for 3", needs_super_hod_approval(3) is False)
-	ok("needs_super_hod True for 4", needs_super_hod_approval(4) is True)
+	ok("needs_super_hod False for 3 @ threshold 3", needs_super_hod_approval(3) is False)
+	ok("needs_super_hod True for 4 @ threshold 3", needs_super_hod_approval(4) is True)
+
+	# Customize threshold to 5 → 4 days should NOT need Super HOD
+	frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, 5)
+	ok("Configurable: threshold 5 → 4 days no Super HOD", needs_super_hod_approval(4) is False)
+	ok("Configurable: threshold 5 → 6 days needs Super HOD", needs_super_hod_approval(6) is True)
+	ok(
+		"Workflow COND_LONG respects threshold 5",
+		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4})) is False,
+	)
+	ok(
+		"get_super_hod_working_days_threshold reads 5",
+		get_super_hod_working_days_threshold() == 5,
+	)
+
+	# Restore
+	frappe.db.set_single_value(
+		SETTINGS_DOCTYPE, THRESHOLD_FIELD, prev if prev not in (None, "") else 3
+	)
 
 	long_rows = [
 		t
@@ -112,7 +140,8 @@ def run():
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print("Rule: working days ≤ 3 → HOD only; > 3 → Super HOD. Backdated leave allowed.")
+	print("Rule: working days ≤ threshold (Attendance Settings) → HOD only; above → Super HOD.")
+	print("Threshold is configurable by HR / Leave Approver / Super HOD.")
 	if failed:
 		frappe.throw(
 			f"Leave workflow tests failed ({failed}): {[n for s, n, _ in results if s == 'FAIL']}"

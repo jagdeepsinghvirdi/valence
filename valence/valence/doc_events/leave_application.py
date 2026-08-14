@@ -8,8 +8,6 @@ from frappe.model.workflow import get_workflow_name
 
 SUPER_HOD_STATE = "Pending Super HOD Approval"
 WORKING_LEAVE_DAYS_FIELD = "custom_working_leave_days"
-# ≤ 3 working days → normal HOD approval; > 3 → Super HOD also required
-SUPER_HOD_WORKING_DAYS_THRESHOLD = 3
 
 
 def validate(doc, method=None):
@@ -60,7 +58,7 @@ def set_working_leave_days(doc, method=None):
 	- Weekly offs (Holiday List weekly_off + Shift Assignment custom_off_day)
 
 	Backdated leave is allowed (no advance-notice block). Workflow uses this
-	field: ≤ 3 working days → HOD only; > 3 → Super HOD also.
+	field vs Attendance Settings → Super HOD After Working Days (configurable).
 	"""
 	if not doc.meta.has_field(WORKING_LEAVE_DAYS_FIELD):
 		return
@@ -159,8 +157,10 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 
 
 def needs_super_hod_approval(working_days) -> bool:
-	"""True when working leave days exceed the normal HOD-only threshold."""
-	return flt(working_days) > SUPER_HOD_WORKING_DAYS_THRESHOLD
+	"""True when working leave days exceed the configurable HOD-only threshold."""
+	from valence.valence.setup.leave_workflow import get_super_hod_working_days_threshold
+
+	return flt(working_days) > get_super_hod_working_days_threshold()
 
 
 def validate_no_leave_on_present_day(doc, method=None):

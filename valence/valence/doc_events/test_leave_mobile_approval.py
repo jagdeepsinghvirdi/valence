@@ -95,8 +95,8 @@ def run():
 			actors["employee"]["employee"],
 			leave_type,
 			days=4,
-			description="E2E mobile long",
-			start_offset=40,
+			description="E2E mobile backdated long",
+			start_offset=-40,
 		)
 		created.append(long.name)
 
@@ -107,7 +107,7 @@ def run():
 
 		long.reload()
 		ok(
-			"After HOD, long leave Pending Super HOD",
+			"After HOD, backdated long leave Pending Super HOD",
 			long.workflow_state == STATE_PENDING_SUPER_HOD,
 			long.workflow_state,
 		)

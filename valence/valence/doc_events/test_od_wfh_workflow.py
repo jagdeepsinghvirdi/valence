@@ -16,6 +16,7 @@ from valence.valence.setup.od_wfh_workflow import (
 	COND_LONG,
 	COND_SHORT,
 	DOCTYPE,
+	WORKING_REQUEST_DAYS_FIELD,
 	WORKFLOW_NAME,
 	ensure_od_wfh_workflow,
 )
@@ -53,6 +54,14 @@ def run():
 			)
 		),
 	)
+	ok(
+		"working request days field exists",
+		bool(
+			frappe.db.exists(
+				"Custom Field", {"dt": DOCTYPE, "fieldname": WORKING_REQUEST_DAYS_FIELD}
+			)
+		),
+	)
 
 	wf = frappe.get_doc("Workflow", WORKFLOW_NAME)
 	state_names = {s.state for s in wf.states}
@@ -78,8 +87,25 @@ def run():
 	]
 	ok("HOD short Approve path exists", len(short_rows) >= 1)
 	ok("HOD long → Super HOD path exists", len(long_rows) >= 1)
-	ok("Short condition uses total_request_days", COND_SHORT in (short_rows[0].condition if short_rows else ""))
-	ok("Long condition uses total_request_days", COND_LONG in (long_rows[0].condition if long_rows else ""))
+	ok(
+		"Short condition uses working days + threshold",
+		COND_SHORT in (short_rows[0].condition if short_rows else ""),
+		short_rows[0].condition if short_rows else "",
+	)
+	ok(
+		"Long condition uses backdated + working days + threshold",
+		COND_LONG in (long_rows[0].condition if long_rows else ""),
+		long_rows[0].condition if long_rows else "",
+	)
+	ok(
+		"Long condition requires backdated from_date",
+		"from_date" in (long_rows[0].condition if long_rows else "")
+		and "now_datetime" in (long_rows[0].condition if long_rows else ""),
+	)
+	ok(
+		"Conditions reference Attendance Settings threshold",
+		"super_hod_working_days_threshold" in (short_rows[0].condition if short_rows else ""),
+	)
 
 	# No self-approval on approve transitions
 	self_ok = all(
@@ -95,6 +121,11 @@ def run():
 		"valence.valence.doc_events.attendance_request.validate"
 		in (hooks.get("validate") or []),
 		str(hooks.get("validate")),
+	)
+	ok(
+		"on_update hook registered",
+		"valence.valence.doc_events.attendance_request.on_update"
+		in (hooks.get("on_update") or []),
 	)
 
 	from valence.valence.doc_events.attendance_request import (

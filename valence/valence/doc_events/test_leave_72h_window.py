@@ -75,10 +75,14 @@ def run():
 			str(doc.get(WORKING_LEAVE_DAYS_FIELD)),
 		)
 
-	# Threshold helpers
+	# Threshold helpers (length-only, and date-aware)
+	past = add_days(getdate(), -5)
+	future = add_days(getdate(), 5)
 	ok("3 working days → no Super HOD", needs_super_hod_approval(3) is False)
-	ok("4 working days → Super HOD", needs_super_hod_approval(4) is True)
+	ok("4 working days → Super HOD (no date)", needs_super_hod_approval(4) is True)
 	ok("2.5 working days → no Super HOD", needs_super_hod_approval(2.5) is False)
+	ok("Future 4 working days → no Super HOD", needs_super_hod_approval(4, from_date=future) is False)
+	ok("Backdated 4 working days → Super HOD", needs_super_hod_approval(4, from_date=past) is True)
 
 	# Mon–Thu = 4 calendar weekdays if no offs
 	days = count_working_leave_days(employee, "2026-09-07", "2026-09-10")
@@ -100,7 +104,7 @@ def run():
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print("Backdated leave allowed; Super HOD when working days > 3.")
+	print("Backdated leave allowed; Super HOD only for backdated leave when working days > 3.")
 	if failed:
 		frappe.throw(f"Working-days leave tests failed ({failed})")
 

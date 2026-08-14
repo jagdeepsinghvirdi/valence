@@ -57,9 +57,10 @@ def set_working_leave_days(doc, method=None):
 	- Holidays (Holiday List)
 	- Weekly offs (Holiday List weekly_off + Shift Assignment custom_off_day)
 
-	Backdated leave is allowed. Super HOD uses this field only when from_date
-	is before today AND working days > Attendance Settings threshold.
-	Future / same-day leave is HOD-only.
+	Backdated leave is allowed (no advance-notice block). Super HOD uses this
+	field only when from_date is before today AND working days > Attendance
+	Settings → Super HOD After Working Days (configurable). Future / same-day
+	leave is HOD-only.
 	"""
 	if not doc.meta.has_field(WORKING_LEAVE_DAYS_FIELD):
 		return

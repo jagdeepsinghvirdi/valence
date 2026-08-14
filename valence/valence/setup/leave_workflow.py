@@ -8,7 +8,7 @@
 - Threshold is configurable in Attendance Settings → Super HOD After Working Days
   (default 3). HOD / Super HOD / HR can change it.
 - Backdated + working days ≤ threshold → HOD Approve → Approved
-- Backdated + working days > threshold → HOD Approve → Pending Super HOD
+- Backdated + working days > threshold → HOD Approve → Pending Super HOD → Super HOD Approve
 """
 
 from __future__ import annotations
@@ -109,7 +109,8 @@ def _ensure_working_leave_days_field():
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
 				"(default 3). Super HOD only for backdated leave above the threshold. "
-				"Future / same-day leave needs only HOD, regardless of length."
+				"Future / same-day leave needs only HOD, regardless of length. "
+				"Backdated leave is allowed."
 			),
 			update_modified=False,
 		)
@@ -130,7 +131,8 @@ def _ensure_working_leave_days_field():
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
 				"(default 3). Super HOD only for backdated leave above the threshold. "
-				"Future / same-day leave needs only HOD, regardless of length."
+				"Future / same-day leave needs only HOD, regardless of length. "
+				"Backdated leave is allowed."
 			),
 		}
 	).insert(ignore_permissions=True)

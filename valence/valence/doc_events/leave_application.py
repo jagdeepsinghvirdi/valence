@@ -1,17 +1,18 @@
 import frappe
 from frappe import _
-from frappe.utils import formatdate, get_datetime, now_datetime
+from frappe.utils import add_days, cint, flt, formatdate, getdate
 from frappe.model.workflow import get_workflow_name
 
 # Shared by Track A (#8) and Track B (#3, #4 extras, #10, #11).
 # Keep each rule in its own function; coordinate before editing this file.
 
 SUPER_HOD_STATE = "Pending Super HOD Approval"
+WORKING_LEAVE_DAYS_FIELD = "custom_working_leave_days"
 
 
 def validate(doc, method=None):
 	"""Leave Application validate — runs each rule in order."""
-	validate_72_hour_window(doc, method)
+	set_working_leave_days(doc, method)
 	validate_no_leave_on_present_day(doc, method)
 	validate_resigned_employee_leave_type(doc, method)
 	sync_leave_status_from_workflow(doc, method)
@@ -48,34 +49,118 @@ def sync_leave_status_from_workflow(doc, method=None):
 			doc.status = "Open"
 
 
-
-def validate_72_hour_window(doc, method=None):
+def set_working_leave_days(doc, method=None):
 	"""
-	#3 72-Hour Leave Application Window (Track B, Day 1)
+	#3 Backdated / normal leave length for approval routing.
 
-	Employees must apply at least 72 hours before leave start (from_date at 00:00).
-	HR roles and system-created applications (short-leave half-day) can bypass.
+	Counts working days between from_date and to_date, excluding:
+	- Holidays (Holiday List)
+	- Weekly offs (Holiday List weekly_off + Shift Assignment custom_off_day)
+
+	Backdated leave is allowed (no advance-notice block). Workflow uses this
+	field vs Attendance Settings → Super HOD After Working Days (configurable).
 	"""
-	if getattr(frappe.flags, "ignore_72_hour_leave_window", False):
+	if not doc.meta.has_field(WORKING_LEAVE_DAYS_FIELD):
 		return
 
-	if _is_hr_user():
+	if not doc.employee or not doc.from_date or not doc.to_date:
+		doc.set(WORKING_LEAVE_DAYS_FIELD, 0)
 		return
 
-	if not doc.from_date:
-		return
+	days = count_working_leave_days(
+		doc.employee,
+		doc.from_date,
+		doc.to_date,
+		half_day=cint(doc.half_day),
+		half_day_date=doc.half_day_date,
+	)
+	doc.set(WORKING_LEAVE_DAYS_FIELD, days)
 
-	leave_start = get_datetime(doc.from_date)
-	hours_until_leave = (leave_start - now_datetime()).total_seconds() / 3600
 
-	if hours_until_leave < 72:
-		frappe.throw(
-			_(
-				"Leave must be applied at least 72 hours before the leave start date ({0}). "
-				"Please choose a later start date or contact HR."
-			).format(formatdate(doc.from_date)),
-			title=_("72-Hour Notice Required"),
-		)
+def count_working_leave_days(employee, from_date, to_date, half_day=0, half_day_date=None) -> float:
+	"""Working days in [from_date, to_date], excluding holidays and week offs."""
+	start, end = getdate(from_date), getdate(to_date)
+	if end < start:
+		return 0.0
+
+	non_working = _get_non_working_dates(employee, start, end)
+	half_day_on = getdate(half_day_date) if half_day and half_day_date else None
+
+	days = 0.0
+	current = start
+	while current <= end:
+		if current not in non_working:
+			if half_day_on and current == half_day_on:
+				days += 0.5
+			else:
+				days += 1.0
+		current = add_days(current, 1)
+
+	return flt(days, 1)
+
+
+def _get_non_working_dates(employee, start, end) -> set:
+	"""Union of holiday-list dates (incl. weekly_off rows) and shift weekly off weekdays."""
+	non_working = set()
+
+	try:
+		from hrms.hr.utils import get_holiday_dates_for_employee
+
+		for d in get_holiday_dates_for_employee(employee, start, end):
+			non_working.add(getdate(d))
+	except Exception:
+		# No holiday list / raise_exception — still apply shift weekly offs below
+		pass
+
+	# Explicit weekly_off holidays (in case list fetch omitted some)
+	holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+	if holiday_list:
+		for d in frappe.get_all(
+			"Holiday",
+			filters={
+				"parent": holiday_list,
+				"holiday_date": ["between", [start, end]],
+				"weekly_off": 1,
+			},
+			pluck="holiday_date",
+		):
+			non_working.add(getdate(d))
+
+	# Shift Assignment weekly off weekday (e.g. Sunday)
+	off_weekday = _get_shift_weekly_off_weekday(employee, start, end)
+	if off_weekday:
+		current = start
+		while current <= end:
+			if current.strftime("%A") == off_weekday:
+				non_working.add(current)
+			current = add_days(current, 1)
+
+	return non_working
+
+
+def _get_shift_weekly_off_weekday(employee, start, end):
+	"""Return weekday name from active Shift Assignment.custom_off_day, if any."""
+	if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+		return None
+
+	assignments = frappe.get_all(
+		"Shift Assignment",
+		filters={"employee": employee, "start_date": ["<=", end], "docstatus": 1},
+		or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
+		fields=["custom_off_day"],
+		order_by="start_date desc",
+	)
+	for row in assignments:
+		if row.custom_off_day:
+			return row.custom_off_day
+	return None
+
+
+def needs_super_hod_approval(working_days) -> bool:
+	"""True when working leave days exceed the configurable HOD-only threshold."""
+	from valence.valence.setup.leave_workflow import get_super_hod_working_days_threshold
+
+	return flt(working_days) > get_super_hod_working_days_threshold()
 
 
 def validate_no_leave_on_present_day(doc, method=None):
@@ -160,8 +245,8 @@ def validate_resigned_employee_leave_type(doc, method=None):
 
 def notify_super_hod_if_needed(doc, method=None):
 	"""
-	#4 Extended Leave Approval — when HOD sends leave (≥ 3 days) to Super HOD,
-	create ToDos + optional desk notification for Super HOD / HR Manager.
+	#4 Extended Leave Approval — when HOD sends leave (> 3 working days) to Super HOD,
+	create ToDos for Super HOD / HR Manager.
 	"""
 	if doc.get("workflow_state") != SUPER_HOD_STATE:
 		return
@@ -179,13 +264,14 @@ def _notify_super_hod_approvers(doc):
 	if not users:
 		return
 
+	working = doc.get(WORKING_LEAVE_DAYS_FIELD) or doc.total_leave_days
 	subject = _("Leave needs Super HOD approval: {0}").format(doc.name)
 	message = _(
-		"Leave Application {0} for {1} ({2} days from {3} to {4}) needs Super HOD approval."
+		"Leave Application {0} for {1} ({2} working days from {3} to {4}) needs Super HOD approval."
 	).format(
 		doc.name,
 		doc.employee_name or doc.employee,
-		doc.total_leave_days,
+		working,
 		formatdate(doc.from_date),
 		formatdate(doc.to_date),
 	)
@@ -193,7 +279,6 @@ def _notify_super_hod_approvers(doc):
 	for user in users:
 		if user in ("Administrator", "Guest"):
 			continue
-		# Avoid duplicate open ToDos for same leave + user
 		existing = frappe.db.exists(
 			"ToDo",
 			{
@@ -239,7 +324,6 @@ def finalize_system_leave_application(doc):
 		doc.submit()
 		return doc
 
-	# Workflow path: set terminal approved state + docstatus without UI transitions
 	frappe.db.set_value(
 		"Leave Application",
 		doc.name,

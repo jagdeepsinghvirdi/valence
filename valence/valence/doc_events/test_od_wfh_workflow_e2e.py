@@ -293,8 +293,12 @@ def _new_request(employee, company, target_working_days, reason, description, st
 	"""
 	Build an Attendance Request whose working-day count matches target_working_days.
 	Scans forward from start_offset until count_working_leave_days hits the target.
+	Clamps from_date to employee joining date (HRMS rejects earlier dates).
 	"""
 	from_date = add_days(getdate(), start_offset)
+	joining = frappe.db.get_value("Employee", employee, "date_of_joining")
+	if joining and getdate(from_date) < getdate(joining):
+		from_date = getdate(joining)
 	to_date = from_date
 	working = 0.0
 	# Cap scan so holidays/week offs don't loop forever
@@ -316,7 +320,13 @@ def _new_request(employee, company, target_working_days, reason, description, st
 			"include_holidays": 0,
 		}
 	)
-	doc.insert(ignore_permissions=True)
+	prev_window = getattr(frappe.flags, "ignore_leave_creation_window", False)
+	if getdate(from_date) < getdate():
+		frappe.flags.ignore_leave_creation_window = True
+	try:
+		doc.insert(ignore_permissions=True)
+	finally:
+		frappe.flags.ignore_leave_creation_window = prev_window
 	doc.reload()
 
 	# Force exact working days if holiday math drifted (e.g. half-day edge)

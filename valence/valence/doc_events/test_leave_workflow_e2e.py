@@ -543,13 +543,16 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 		}
 	)
 
-	prev_flag = getattr(frappe.flags, "ignore_present_day_leave_restriction", False)
+	prev_present = getattr(frappe.flags, "ignore_present_day_leave_restriction", False)
+	prev_window = getattr(frappe.flags, "ignore_leave_creation_window", False)
 	if getdate(from_date) < getdate():
 		frappe.flags.ignore_present_day_leave_restriction = True
+		frappe.flags.ignore_leave_creation_window = True
 	try:
 		doc.insert(ignore_permissions=True)
 	finally:
-		frappe.flags.ignore_present_day_leave_restriction = prev_flag
+		frappe.flags.ignore_present_day_leave_restriction = prev_present
+		frappe.flags.ignore_leave_creation_window = prev_window
 	doc.reload()
 
 	# Pin working-days field used by workflow conditions

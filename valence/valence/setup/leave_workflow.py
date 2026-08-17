@@ -1,12 +1,14 @@
 """
 #3 / #4 Leave Application approval routing (Track B)
 
-- Backdated leave is allowed (employee can apply after returning to work).
+- Backdated leave is allowed only within Attendance Settings → Backdated Creation
+  Window (Days) counted from the leave end date (calendar days, default 3).
+  This is a creation rule, not approval.
 - Future / same-day leave is HOD-only (no Super HOD), regardless of length.
 - Super HOD applies only to backdated leave (from_date before today).
 - Working leave days exclude holidays + week offs.
-- Threshold is configurable in Attendance Settings → Super HOD After Working Days
-  (default 3). HOD / Super HOD / HR can change it.
+- Super HOD threshold is configurable in Attendance Settings → Super HOD After
+  Working Days (default 3). HOD / Super HOD / HR can change it.
 - Backdated + working days ≤ threshold → HOD Approve → Approved
 - Backdated + working days > threshold → HOD Approve → Pending Super HOD → Super HOD Approve
 """
@@ -32,6 +34,8 @@ WORKING_LEAVE_DAYS_FIELD = "custom_working_leave_days"
 SETTINGS_DOCTYPE = "Attendance Settings"
 THRESHOLD_FIELD = "super_hod_working_days_threshold"
 DEFAULT_THRESHOLD = 3
+CREATION_WINDOW_FIELD = "leave_creation_window_days"
+DEFAULT_CREATION_WINDOW = 3
 
 # Workflow reads threshold from Attendance Settings (editable by HR / HOD / Super HOD).
 # Cast to float — Singles often return strings.
@@ -75,26 +79,47 @@ def ensure_leave_application_workflow():
 
 def get_super_hod_working_days_threshold() -> int:
 	"""Current configurable threshold (working days). Default 3."""
-	value = frappe.db.get_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD)
+	return _positive_int_setting(THRESHOLD_FIELD, DEFAULT_THRESHOLD)
+
+
+def get_leave_creation_window_days() -> int:
+	"""Calendar-day window from end date for creating backdated Leave / OD / WFH. Default 3."""
+	return _positive_int_setting(CREATION_WINDOW_FIELD, DEFAULT_CREATION_WINDOW)
+
+
+def _positive_int_setting(fieldname: str, default: int) -> int:
+	if not frappe.db.exists("DocType", SETTINGS_DOCTYPE):
+		return default
+	if not frappe.get_meta(SETTINGS_DOCTYPE).has_field(fieldname):
+		return default
+	value = frappe.db.get_single_value(SETTINGS_DOCTYPE, fieldname)
 	if value in (None, ""):
-		return DEFAULT_THRESHOLD
+		return default
 	try:
 		value = int(value)
 	except (TypeError, ValueError):
-		return DEFAULT_THRESHOLD
-	# 0 / negative treated as unset → default (workflow uses `or 3` similarly)
+		return default
+	# 0 / negative treated as unset
 	if value <= 0:
-		return DEFAULT_THRESHOLD
+		return default
 	return value
 
 
 def _ensure_threshold_setting():
-	"""Ensure Single has a usable threshold value (migrate / first install)."""
+	"""Ensure Single has usable Super HOD + creation-window values."""
 	if not frappe.db.exists("DocType", SETTINGS_DOCTYPE):
 		return
-	current = frappe.db.get_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD)
-	if current in (None, "", 0, "0"):
-		frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, DEFAULT_THRESHOLD)
+	meta = frappe.get_meta(SETTINGS_DOCTYPE)
+	if meta.has_field(THRESHOLD_FIELD):
+		current = frappe.db.get_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD)
+		if current in (None, "", 0, "0"):
+			frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, DEFAULT_THRESHOLD)
+	if meta.has_field(CREATION_WINDOW_FIELD):
+		window = frappe.db.get_single_value(SETTINGS_DOCTYPE, CREATION_WINDOW_FIELD)
+		if window in (None, "", 0, "0"):
+			frappe.db.set_single_value(
+				SETTINGS_DOCTYPE, CREATION_WINDOW_FIELD, DEFAULT_CREATION_WINDOW
+			)
 
 
 def _ensure_working_leave_days_field():

@@ -233,6 +233,9 @@ doc_events = {
       "validate": "valence.valence.doc_events.attendance_request.validate",
       "on_update": "valence.valence.doc_events.attendance_request.on_update",
   },
+  "Quarterly Working Days": {
+    "on_update": "valence.valence.tasks.leave_balance_update.credit_leave_from_qwd",
+   },
 
 }
 

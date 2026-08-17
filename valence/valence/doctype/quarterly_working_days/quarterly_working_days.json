@@ -7,10 +7,12 @@
  "engine": "InnoDB",
  "field_order": [
   "quarterly_working_days_section",
+  "column_break_mlcl",
   "employee",
   "company",
   "quarter_start_date",
   "quarter_end_date",
+  "leave_type",
   "working_days",
   "is_manual_entry"
  ],
@@ -61,13 +63,24 @@
    "fieldname": "is_manual_entry",
    "fieldtype": "Check",
    "label": "Is Manual Entry"
+  },
+  {
+   "fieldname": "column_break_mlcl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "leave_type",
+   "fieldtype": "Link",
+   "label": "Leave Type",
+   "options": "Leave Type",
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-07 17:08:24.922178",
- "modified_by": "imjaskiratsingh03@gmail.com",
+ "modified": "2026-08-13 15:52:15.993483",
+ "modified_by": "Administrator",
  "module": "Valence",
  "name": "Quarterly Working Days",
  "naming_rule": "Expression",

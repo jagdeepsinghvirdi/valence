@@ -17,7 +17,7 @@ UNRESTRICTED_LEAVE_ROLES = frozenset(
 		"HR Manager",
 		"HR User",
 		"Administrator",
-		# Super HOD final-approves 3+ day leave org-wide (#4)
+		# Super HOD final-approves backdated leave above threshold org-wide (#4)
 		"Super HOD",
 	}
 )

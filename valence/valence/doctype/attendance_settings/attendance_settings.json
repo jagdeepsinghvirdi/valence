@@ -38,11 +38,11 @@
   {
    "fieldname": "leave_approval_section",
    "fieldtype": "Section Break",
-   "label": "Leave Approval"
+   "label": "Leave / OD / WFH Approval"
   },
   {
    "default": "3",
-   "description": "Working days (holidays and week offs excluded). Leave with working days up to this value needs only HOD approval. More than this also needs Super HOD. Change anytime — default 3.",
+   "description": "Working days (holidays and week offs excluded). Applies only to backdated Leave and OD/WFH: up to this value needs only HOD; more also needs Super HOD. Future / same-day requests need only HOD regardless of length. Default 3.",
    "fieldname": "super_hod_working_days_threshold",
    "fieldtype": "Int",
    "label": "Super HOD After Working Days",
@@ -54,7 +54,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-13 17:00:00.000000",
+ "modified": "2026-08-14 14:50:00.000000",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Attendance Settings",

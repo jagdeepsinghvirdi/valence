@@ -2,7 +2,15 @@
 #7 OD/WFH Workflow (Track B)
 
 Uses standard HRMS Attendance Request (reason: Work From Home / On Duty).
-Same approval chain as leave (#4): HOD for short requests, Super HOD for 3+ days.
+
+Same approval rules as Leave Application (#3 / #4):
+- Backdated OD/WFH is allowed.
+- Future / same-day OD/WFH is HOD-only (no Super HOD), regardless of length.
+- Super HOD applies only to backdated requests (from_date before today).
+- Length is counted in working days (holidays + week offs excluded).
+- Threshold from Attendance Settings → Super HOD After Working Days (default 3).
+- Backdated + working days ≤ threshold → HOD Approve → Approved
+- Backdated + working days > threshold → HOD Approve → Pending Super HOD
 """
 
 from __future__ import annotations
@@ -10,14 +18,19 @@ from __future__ import annotations
 import frappe
 
 from valence.valence.setup.leave_workflow import (
-	ACTIONS,
+	COND_BACKDATED,
+	COND_NOT_BACKDATED,
+	DEFAULT_THRESHOLD,
 	ROLE_SUPER_HOD,
+	SETTINGS_DOCTYPE,
 	STATE_APPROVED,
 	STATE_DRAFT,
 	STATE_PENDING_HOD,
 	STATE_PENDING_SUPER_HOD,
 	STATE_REJECTED,
+	THRESHOLD_FIELD,
 	_ensure_roles,
+	_ensure_threshold_setting,
 	_ensure_workflow_actions,
 	_ensure_workflow_states,
 	_transition,
@@ -26,8 +39,21 @@ from valence.valence.setup.leave_workflow import (
 WORKFLOW_NAME = "OD WFH Request Approval"
 DOCTYPE = "Attendance Request"
 
-COND_SHORT = "(doc.total_request_days or 0) < 3"
-COND_LONG = "(doc.total_request_days or 0) >= 3"
+# Working days used by workflow conditions (same threshold as leave)
+WORKING_REQUEST_DAYS_FIELD = "custom_working_request_days"
+
+_THRESHOLD_EXPR = (
+	f"float(frappe.db.get_value('{SETTINGS_DOCTYPE}', '{SETTINGS_DOCTYPE}', "
+	f"'{THRESHOLD_FIELD}') or {DEFAULT_THRESHOLD})"
+)
+COND_SHORT = (
+	f"({COND_NOT_BACKDATED}) or "
+	f"(float(doc.{WORKING_REQUEST_DAYS_FIELD} or 0) <= {_THRESHOLD_EXPR})"
+)
+COND_LONG = (
+	f"({COND_BACKDATED}) and "
+	f"(float(doc.{WORKING_REQUEST_DAYS_FIELD} or 0) > {_THRESHOLD_EXPR})"
+)
 
 
 def after_migrate():
@@ -36,6 +62,7 @@ def after_migrate():
 
 def ensure_od_wfh_workflow():
 	"""Idempotent: safe on migrate and via bench execute."""
+	_ensure_threshold_setting()
 	_ensure_custom_fields()
 	_ensure_roles()
 	_ensure_workflow_states()
@@ -47,7 +74,7 @@ def ensure_od_wfh_workflow():
 
 
 def _ensure_custom_fields():
-	"""Workflow field + day count for transition conditions."""
+	"""Workflow field + working-day count for Super HOD routing."""
 	fields = [
 		{
 			"dt": DOCTYPE,
@@ -70,10 +97,42 @@ def _ensure_custom_fields():
 			"read_only": 1,
 			"hidden": 1,
 			"no_copy": 1,
+			"description": "Calendar days in the request period (from_date → to_date).",
+		},
+		{
+			"dt": DOCTYPE,
+			"fieldname": WORKING_REQUEST_DAYS_FIELD,
+			"label": "Working Request Days",
+			"fieldtype": "Float",
+			"precision": "1",
+			"insert_after": "total_request_days",
+			"read_only": 1,
+			"description": (
+				"Working days in OD/WFH period excluding holidays and week offs. "
+				"Compared to Attendance Settings → Super HOD After Working Days "
+				"(default 3). Super HOD only for backdated OD/WFH above the threshold. "
+				"Future / same-day requests need only HOD, regardless of length."
+			),
 		},
 	]
 	for spec in fields:
-		if frappe.db.exists("Custom Field", {"dt": spec["dt"], "fieldname": spec["fieldname"]}):
+		existing = frappe.db.exists(
+			"Custom Field", {"dt": spec["dt"], "fieldname": spec["fieldname"]}
+		)
+		if existing:
+			# Keep descriptions / labels in sync with leave routing rules
+			updates = {
+				k: spec[k]
+				for k in ("label", "description", "fieldtype", "precision", "hidden", "read_only")
+				if k in spec
+			}
+			if updates:
+				frappe.db.set_value(
+					"Custom Field",
+					{"dt": spec["dt"], "fieldname": spec["fieldname"]},
+					updates,
+					update_modified=False,
+				)
 			continue
 		doc = frappe.get_doc({"doctype": "Custom Field", "module": "Valence", **spec})
 		doc.insert(ignore_permissions=True)
@@ -119,7 +178,7 @@ def _ensure_workflow():
 			STATE_PENDING_SUPER_HOD,
 			0,
 			ROLE_SUPER_HOD,
-			"Awaiting Super HOD (request of 3+ days)",
+			"Awaiting Super HOD (backdated request above Attendance Settings threshold)",
 		),
 		_ar_state_row(STATE_APPROVED, 1, "HR Manager", "OD/WFH approved"),
 		_ar_state_row(STATE_REJECTED, 0, "HR Manager", "OD/WFH rejected"),

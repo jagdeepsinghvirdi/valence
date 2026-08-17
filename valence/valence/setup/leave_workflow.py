@@ -2,11 +2,13 @@
 #3 / #4 Leave Application approval routing (Track B)
 
 - Backdated leave is allowed (employee can apply after returning to work).
+- Future / same-day leave is HOD-only (no Super HOD), regardless of length.
+- Super HOD applies only to backdated leave (from_date before today).
 - Working leave days exclude holidays + week offs.
 - Threshold is configurable in Attendance Settings → Super HOD After Working Days
   (default 3). HOD / Super HOD / HR can change it.
-- HOD Approve: working days ≤ threshold → Approved
-- HOD Approve: working days > threshold → Pending Super HOD → Super HOD Approve
+- Backdated + working days ≤ threshold → HOD Approve → Approved
+- Backdated + working days > threshold → HOD Approve → Pending Super HOD → Super HOD Approve
 """
 
 from __future__ import annotations
@@ -37,8 +39,21 @@ _THRESHOLD_EXPR = (
 	f"float(frappe.db.get_value('{SETTINGS_DOCTYPE}', '{SETTINGS_DOCTYPE}', "
 	f"'{THRESHOLD_FIELD}') or {DEFAULT_THRESHOLD})"
 )
-COND_SHORT = f"float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) <= {_THRESHOLD_EXPR}"
-COND_LONG = f"float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) > {_THRESHOLD_EXPR}"
+# Super HOD only when from_date is before today. Uses frappe.utils (safe_eval whitelist).
+COND_BACKDATED = (
+	"frappe.utils.get_datetime(doc.from_date).date() < frappe.utils.now_datetime().date()"
+)
+COND_NOT_BACKDATED = (
+	"frappe.utils.get_datetime(doc.from_date).date() >= frappe.utils.now_datetime().date()"
+)
+COND_SHORT = (
+	f"({COND_NOT_BACKDATED}) or "
+	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) <= {_THRESHOLD_EXPR})"
+)
+COND_LONG = (
+	f"({COND_BACKDATED}) and "
+	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) > {_THRESHOLD_EXPR})"
+)
 
 
 def after_migrate():
@@ -93,7 +108,8 @@ def _ensure_working_leave_days_field():
 			(
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Up to threshold → HOD only; above → Super HOD also. "
+				"(default 3). Super HOD only for backdated leave above the threshold. "
+				"Future / same-day leave needs only HOD, regardless of length. "
 				"Backdated leave is allowed."
 			),
 			update_modified=False,
@@ -114,7 +130,8 @@ def _ensure_working_leave_days_field():
 			"description": (
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Up to threshold → HOD only; above → Super HOD also. "
+				"(default 3). Super HOD only for backdated leave above the threshold. "
+				"Future / same-day leave needs only HOD, regardless of length. "
 				"Backdated leave is allowed."
 			),
 		}
@@ -223,7 +240,7 @@ def _ensure_workflow():
 			0,
 			ROLE_SUPER_HOD,
 			"Open",
-			"Awaiting Super HOD (working days above Attendance Settings threshold)",
+			"Awaiting Super HOD (backdated leave above Attendance Settings threshold)",
 		),
 		_state_row(STATE_APPROVED, 1, "HR Manager", "Approved", "Leave approved"),
 		_state_row(STATE_REJECTED, 1, "HR Manager", "Rejected", "Leave rejected"),

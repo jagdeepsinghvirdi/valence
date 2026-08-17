@@ -3,7 +3,7 @@
 
 Whitelisted APIs for HOD / Super HOD leave approve & reject from mobile
 (or any API client). Uses standard Frappe workflow under the hood so desk
-and mobile stay in sync — including the Super HOD step for long leaves.
+and mobile stay in sync — including the Super HOD step for backdated long leaves.
 """
 
 from __future__ import annotations

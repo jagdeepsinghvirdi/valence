@@ -51,14 +51,16 @@ def sync_leave_status_from_workflow(doc, method=None):
 
 def set_working_leave_days(doc, method=None):
 	"""
-	#3 Backdated / normal leave length for approval routing.
+	#3 Leave length for approval routing.
 
 	Counts working days between from_date and to_date, excluding:
 	- Holidays (Holiday List)
 	- Weekly offs (Holiday List weekly_off + Shift Assignment custom_off_day)
 
-	Backdated leave is allowed (no advance-notice block). Workflow uses this
-	field vs Attendance Settings → Super HOD After Working Days (configurable).
+	Backdated leave is allowed (no advance-notice block). Super HOD uses this
+	field only when from_date is before today AND working days > Attendance
+	Settings → Super HOD After Working Days (configurable). Future / same-day
+	leave is HOD-only.
 	"""
 	if not doc.meta.has_field(WORKING_LEAVE_DAYS_FIELD):
 		return
@@ -156,10 +158,16 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 	return None
 
 
-def needs_super_hod_approval(working_days) -> bool:
-	"""True when working leave days exceed the configurable HOD-only threshold."""
+def needs_super_hod_approval(working_days, from_date=None) -> bool:
+	"""True only for backdated requests whose working days exceed the threshold.
+
+	Future / same-day leave is HOD-only. If from_date is omitted, only the
+	working-day threshold is applied (used by length-only unit checks).
+	"""
 	from valence.valence.setup.leave_workflow import get_super_hod_working_days_threshold
 
+	if from_date is not None and getdate(from_date) >= getdate():
+		return False
 	return flt(working_days) > get_super_hod_working_days_threshold()
 
 
@@ -245,8 +253,8 @@ def validate_resigned_employee_leave_type(doc, method=None):
 
 def notify_super_hod_if_needed(doc, method=None):
 	"""
-	#4 Extended Leave Approval — when HOD sends leave (> 3 working days) to Super HOD,
-	create ToDos for Super HOD / HR Manager.
+	#4 Extended Leave Approval — when HOD sends a backdated leave (working days
+	above threshold) to Super HOD, create ToDos for Super HOD / HR Manager.
 	"""
 	if doc.get("workflow_state") != SUPER_HOD_STATE:
 		return

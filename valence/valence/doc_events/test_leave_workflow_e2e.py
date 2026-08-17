@@ -29,8 +29,10 @@ HOD_USER = "e2e.hod@valence.test"
 SUPER_HOD_USER = "e2e.superhod@valence.test"
 PASSWORD = "Test@Leave123"
 
-# Far enough / sized for working-day Super HOD tests (≤3 vs >3)
+# Future leaves: HOD-only. Super HOD tests use backdated offsets.
 FROM_OFFSET_DAYS = 10
+BACKDATED_LONG_OFFSET = -40
+BACKDATED_REJECT_OFFSET = -55
 
 
 
@@ -96,13 +98,37 @@ def run():
 			f"state={short.workflow_state} status={short.status} docstatus={short.docstatus}",
 		)
 
-		# ------ LONG LEAVE (> 3 working days): apply → HOD → Super HOD → Approved ------
+		# ------ FUTURE LONG LEAVE: HOD only (no Super HOD) ------
+		future_long = _new_leave(
+			actors["employee"]["employee"],
+			leave_type,
+			days=4,
+			description="E2E future long leave",
+			start_offset=FROM_OFFSET_DAYS + 15,
+		)
+		created_names.append(future_long.name)
+
+		with _as_user(EMP_USER):
+			apply_workflow(frappe.get_doc("Leave Application", future_long.name), "Apply")
+		with _as_user(HOD_USER):
+			apply_workflow(frappe.get_doc("Leave Application", future_long.name), "Approve")
+
+		future_long.reload()
+		ok(
+			"Future long: HOD Approve → Approved (no Super HOD)",
+			future_long.workflow_state == STATE_APPROVED
+			and future_long.status == "Approved"
+			and future_long.docstatus == 1,
+			f"state={future_long.workflow_state} status={future_long.status}",
+		)
+
+		# ------ BACKDATED LONG LEAVE (> 3 working days): apply → HOD → Super HOD → Approved ------
 		long = _new_leave(
 			actors["employee"]["employee"],
 			leave_type,
 			days=4,
-			description="E2E long leave",
-			start_offset=FROM_OFFSET_DAYS + 15,
+			description="E2E backdated long leave",
+			start_offset=BACKDATED_LONG_OFFSET,
 		)
 		created_names.append(long.name)
 
@@ -123,7 +149,7 @@ def run():
 
 		long.reload()
 		ok(
-			"Long: HOD Approve → Pending Super HOD",
+			"Backdated long: HOD Approve → Pending Super HOD",
 			long.workflow_state == STATE_PENDING_SUPER_HOD and long.docstatus == 0,
 			f"state={long.workflow_state} status={long.status}",
 		)
@@ -140,7 +166,7 @@ def run():
 		)
 		todo_users = {t.allocated_to for t in todos}
 		ok(
-			"Long: Super HOD ToDo created",
+			"Backdated long: Super HOD ToDo created",
 			SUPER_HOD_USER in todo_users,
 			f"todos={list(todo_users)}",
 		)
@@ -151,7 +177,7 @@ def run():
 
 		long.reload()
 		ok(
-			"Long: Super HOD Approve → Approved",
+			"Backdated long: Super HOD Approve → Approved",
 			long.workflow_state == STATE_APPROVED
 			and long.status == "Approved"
 			and long.docstatus == 1,
@@ -189,7 +215,7 @@ def run():
 			leave_type,
 			days=5,
 			description="E2E reject at Super HOD",
-			start_offset=FROM_OFFSET_DAYS + 45,
+			start_offset=BACKDATED_REJECT_OFFSET,
 		)
 		created_names.append(rej2.name)
 
@@ -490,7 +516,7 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 	"""Create leave draft; force custom_working_leave_days for workflow routing tests.
 
 	`days` here means intended working-day count for Super HOD threshold tests
-	(≤3 HOD-only, >3 Super HOD), not necessarily calendar span after holidays.
+	(backdated + above threshold → Super HOD; future / ≤ threshold → HOD only).
 	"""
 	if start_offset is None:
 		start_offset = FROM_OFFSET_DAYS
@@ -517,7 +543,13 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 		}
 	)
 
-	doc.insert(ignore_permissions=True)
+	prev_flag = getattr(frappe.flags, "ignore_present_day_leave_restriction", False)
+	if getdate(from_date) < getdate():
+		frappe.flags.ignore_present_day_leave_restriction = True
+	try:
+		doc.insert(ignore_permissions=True)
+	finally:
+		frappe.flags.ignore_present_day_leave_restriction = prev_flag
 	doc.reload()
 
 	# Pin working-days field used by workflow conditions

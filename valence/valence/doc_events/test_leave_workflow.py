@@ -60,9 +60,14 @@ def run():
 	def eval_cond(cond, d):
 		return frappe.safe_eval(cond, get_workflow_safe_globals(), dict(doc=d))
 
-	short = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 3})
-	long = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4})
-	half = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 0.5})
+	past = add_days(getdate(), -7)
+	future = add_days(getdate(), 7)
+	today = getdate()
+	short_past = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 3, "from_date": past})
+	long_past = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4, "from_date": past})
+	long_future = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4, "from_date": future})
+	long_today = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4, "from_date": today})
+	half_past = frappe._dict({WORKING_LEAVE_DAYS_FIELD: 0.5, "from_date": past})
 
 	from valence.valence.setup.leave_workflow import (
 		get_super_hod_working_days_threshold,
@@ -74,21 +79,37 @@ def run():
 	prev = frappe.db.get_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD)
 	frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, 3)
 
-	ok("COND_SHORT true for 3 working days (threshold 3)", eval_cond(COND_SHORT, short) is True)
-	ok("COND_SHORT false for 4 working days (threshold 3)", eval_cond(COND_SHORT, long) is False)
-	ok("COND_LONG true for 4 working days (threshold 3)", eval_cond(COND_LONG, long) is True)
-	ok("COND_LONG false for 3 working days (threshold 3)", eval_cond(COND_LONG, short) is False)
-	ok("COND_SHORT true for half day", eval_cond(COND_SHORT, half) is True)
+	ok("COND_SHORT true for backdated 3 days (threshold 3)", eval_cond(COND_SHORT, short_past) is True)
+	ok("COND_SHORT false for backdated 4 days (threshold 3)", eval_cond(COND_SHORT, long_past) is False)
+	ok("COND_LONG true for backdated 4 days (threshold 3)", eval_cond(COND_LONG, long_past) is True)
+	ok("COND_LONG false for backdated 3 days (threshold 3)", eval_cond(COND_LONG, short_past) is False)
+	ok("COND_SHORT true for future 4 days (no Super HOD)", eval_cond(COND_SHORT, long_future) is True)
+	ok("COND_LONG false for future 4 days", eval_cond(COND_LONG, long_future) is False)
+	ok("COND_SHORT true for same-day 4 days", eval_cond(COND_SHORT, long_today) is True)
+	ok("COND_LONG false for same-day 4 days", eval_cond(COND_LONG, long_today) is False)
+	ok("COND_SHORT true for backdated half day", eval_cond(COND_SHORT, half_past) is True)
 	ok("needs_super_hod False for 3 @ threshold 3", needs_super_hod_approval(3) is False)
-	ok("needs_super_hod True for 4 @ threshold 3", needs_super_hod_approval(4) is True)
+	ok("needs_super_hod True for 4 @ threshold 3 (no date)", needs_super_hod_approval(4) is True)
+	ok(
+		"needs_super_hod False for future 4 days",
+		needs_super_hod_approval(4, from_date=future) is False,
+	)
+	ok(
+		"needs_super_hod True for backdated 4 days",
+		needs_super_hod_approval(4, from_date=past) is True,
+	)
 
 	# Customize threshold to 5 → 4 days should NOT need Super HOD
 	frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, 5)
 	ok("Configurable: threshold 5 → 4 days no Super HOD", needs_super_hod_approval(4) is False)
 	ok("Configurable: threshold 5 → 6 days needs Super HOD", needs_super_hod_approval(6) is True)
 	ok(
-		"Workflow COND_LONG respects threshold 5",
-		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4})) is False,
+		"Workflow COND_LONG respects threshold 5 (backdated 4 days)",
+		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4, "from_date": past})) is False,
+	)
+	ok(
+		"Future 6 days still HOD-only at threshold 5",
+		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 6, "from_date": future})) is False,
 	)
 	ok(
 		"get_super_hod_working_days_threshold reads 5",
@@ -140,7 +161,7 @@ def run():
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print("Rule: working days ≤ threshold (Attendance Settings) → HOD only; above → Super HOD.")
+	print("Rule: future/same-day → HOD only; backdated ≤ threshold → HOD; backdated above → Super HOD.")
 	print("Threshold is configurable by HR / Leave Approver / Super HOD.")
 	if failed:
 		frappe.throw(

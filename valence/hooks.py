@@ -239,6 +239,9 @@ doc_events = {
         "before_submit": "valence.valence.doc_events.short_leave_application.before_submit",
         "on_update": "valence.valence.doc_events.short_leave_application.on_update",
     },
+  "Quarterly Working Days": {
+    "on_update": "valence.valence.tasks.leave_balance_update.credit_leave_from_qwd",
+   },
 
 }
 

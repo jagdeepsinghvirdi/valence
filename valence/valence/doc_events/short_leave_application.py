@@ -30,10 +30,66 @@ DEFAULT_OFFICIAL_MONTHLY_CAP = 0  # 0 = unlimited
 
 
 def validate(doc, method=None):
+	set_employee_from_session_if_needed(doc)
+	restrict_employee_to_self_for_regular_employees(doc)
 	set_duration(doc)
 	validate_duration_against_settings(doc)
 	validate_monthly_cap(doc)
 	set_defaults(doc)
+
+
+def set_employee_from_session_if_needed(doc):
+	if doc.employee or not doc.is_new():
+		return
+	linked_employee = frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "name")
+	if linked_employee:
+		doc.employee = linked_employee
+
+
+def restrict_employee_to_self_for_regular_employees(doc):
+	if _is_privileged_user():
+		return  # HR / Approver roles may file on behalf of anyone
+
+	linked_employee = frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "name")
+	if linked_employee and doc.employee != linked_employee:
+		frappe.throw(
+			_("You can only apply for Short Leave for yourself."),
+			title=_("Not Allowed"),
+		)
+
+
+@frappe.whitelist()
+def is_privileged_user():
+	"""
+	Whitelisted so the client (short_leave_application.js) can ask the
+	server directly whether the current user may file a Short Leave on
+	someone else's behalf — single source of truth, see
+	restrict_employee_to_self_for_regular_employees / _is_privileged_user.
+	"""
+	return _is_privileged_user()
+
+
+def _is_privileged_user():
+	"""
+	Reuses this app's existing, already-verified HR-role check rather than
+	maintaining a second, separately-guessed role list. See
+	valence.valence.doc_events.leave_application._is_hr_user — the same
+	roles (HR Manager / HR User / System Manager) are already trusted there
+	for the same kind of "can act on behalf of others" decision.
+
+	"Leave Approver" is added on top since that's the role this app already
+	uses specifically for Reporting Head approval — see the permissions on
+	Attendance Settings and valence.valence.setup.short_leave_workflow.
+	"""
+	try:
+		from valence.valence.doc_events.leave_application import _is_hr_user
+
+		if _is_hr_user():
+			return True
+	except Exception:
+		pass
+
+	return "Leave Approver" in frappe.get_roles()
 
 
 def before_submit(doc, method=None):

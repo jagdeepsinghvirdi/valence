@@ -19,6 +19,7 @@ from hrms.hr.utils import share_doc_with_approver
 from valence.valence.doc_events.leave_application import (
 	_users_with_roles,
 	count_working_leave_days,
+	validate_leave_creation_window,
 )
 from valence.valence.setup.leave_workflow import (
 	STATE_APPROVED,
@@ -35,6 +36,7 @@ def validate(doc, method=None):
 	"""Attendance Request validate — OD/WFH business rules."""
 	set_request_day_counts(doc)
 	validate_mandatory_explanation(doc)
+	validate_leave_creation_window(doc)
 	validate_no_self_approval(doc)
 
 

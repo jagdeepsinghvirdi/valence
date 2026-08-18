@@ -13,6 +13,7 @@ WORKING_LEAVE_DAYS_FIELD = "custom_working_leave_days"
 def validate(doc, method=None):
 	"""Leave Application validate — runs each rule in order."""
 	set_working_leave_days(doc, method)
+	validate_leave_creation_window(doc, method)
 	validate_no_leave_on_present_day(doc, method)
 	validate_resigned_employee_leave_type(doc, method)
 	sync_leave_status_from_workflow(doc, method)
@@ -156,6 +157,50 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 		if row.custom_off_day:
 			return row.custom_off_day
 	return None
+
+
+def validate_leave_creation_window(doc, method=None):
+	"""
+	3-day (configurable) window applies only when creating / changing to_date.
+
+	Employee may create backdated Leave or OD/WFH only if to_date (end date) is
+	within Attendance Settings → Backdated Creation Window (Days). Approval has
+	no time limit — HOD / Super HOD can approve anytime.
+	"""
+	if getattr(frappe.flags, "ignore_leave_creation_window", False):
+		return
+
+	if _is_hr_user():
+		return
+
+	if not doc.to_date:
+		return
+
+	# Approval and other updates: skip if end date did not change
+	if not doc.is_new():
+		before = doc.get_doc_before_save()
+		if before and before.to_date and getdate(before.to_date) == getdate(doc.to_date):
+			return
+
+	from valence.valence.setup.leave_workflow import get_leave_creation_window_days
+
+	window = get_leave_creation_window_days()
+	to_date = getdate(doc.to_date)
+	today = getdate()
+	if to_date >= today:
+		return
+
+	earliest = add_days(today, -window)
+	if to_date < earliest:
+		kind = _("leave") if doc.doctype == "Leave Application" else _("OD/WFH request")
+		frappe.throw(
+			_(
+				"Backdated {0} can be created only within {1} days of the end date. "
+				"Earliest allowed end date is {2}."
+			).format(kind, frappe.bold(window), formatdate(earliest)),
+			title=_("Creation Window Exceeded"),
+		)
+
 
 
 def needs_super_hod_approval(working_days, from_date=None) -> bool:

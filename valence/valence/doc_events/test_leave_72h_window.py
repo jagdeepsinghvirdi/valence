@@ -14,7 +14,7 @@ from valence.valence.doc_events.leave_application import (
 	count_working_leave_days,
 	needs_super_hod_approval,
 	set_working_leave_days,
-	validate,
+	validate_leave_creation_window,
 )
 
 
@@ -75,6 +75,64 @@ def run():
 			str(doc.get(WORKING_LEAVE_DAYS_FIELD)),
 		)
 
+	# 3-day window is for CREATION only, counted from leave END date
+	with patch(
+		"valence.valence.doc_events.leave_application.frappe.get_roles",
+		return_value=["Employee"],
+	):
+		within = make_doc(add_days(getdate(), -5), add_days(getdate(), -3))
+		allowed = True
+		err = ""
+		try:
+			validate_leave_creation_window(within)
+		except Exception as e:
+			allowed = False
+			err = str(e)
+		ok("Create within 3 days of end date is allowed", allowed, err[:100])
+
+		# Start can be older than 3 days if end date is still inside the window
+		old_start = make_doc(add_days(getdate(), -10), add_days(getdate(), -2))
+		old_start_ok = True
+		err = ""
+		try:
+			validate_leave_creation_window(old_start)
+		except Exception as e:
+			old_start_ok = False
+			err = str(e)
+		ok("Start date older than 3 days is allowed if end date is within window", old_start_ok, err[:100])
+
+		too_old = make_doc(add_days(getdate(), -8), add_days(getdate(), -4))
+		blocked = False
+		err = ""
+		try:
+			validate_leave_creation_window(too_old)
+		except Exception as e:
+			blocked = "Creation Window" in str(e) or "end date" in str(e).lower()
+			err = str(e)
+		ok("Create older than 3 days from end date is blocked", blocked, err[:120])
+
+		future_doc = make_doc(add_days(getdate(), 5), add_days(getdate(), 6))
+		future_ok = True
+		try:
+			validate_leave_creation_window(future_doc)
+		except Exception:
+			future_ok = False
+		ok("Future leave creation is not limited by 3-day window", future_ok)
+
+		# Existing doc, to_date unchanged → approval path must not throw
+		too_old.flags.in_insert = False
+		with patch.object(too_old, "is_new", return_value=False), patch.object(
+			too_old, "get_doc_before_save", return_value=too_old
+		):
+			approve_ok = True
+			err = ""
+			try:
+				validate_leave_creation_window(too_old)
+			except Exception as e:
+				approve_ok = False
+				err = str(e)
+			ok("Approval of older leave is not blocked by 3-day window", approve_ok, err[:100])
+
 	# Threshold helpers (length-only, and date-aware)
 	past = add_days(getdate(), -5)
 	future = add_days(getdate(), 5)
@@ -104,7 +162,7 @@ def run():
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print("Backdated leave allowed; Super HOD only for backdated leave when working days > 3.")
+	print("Backdated leave create window = 3 calendar days from end date; Super HOD only for backdated leave when working days > 3.")
 	if failed:
 		frappe.throw(f"Working-days leave tests failed ({failed})")
 

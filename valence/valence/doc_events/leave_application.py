@@ -353,7 +353,13 @@ def notify_super_hod_if_needed(doc, method=None):
 
 
 def share_doc_with_super_hod(doc):
-	"""Grant Super HOD / HR Manager access so they can open and approve the document."""
+	"""Grant Super HOD / HR Manager access so they can open and approve the document.
+
+	Must ignore share-permission checks: HOD (Leave Approver) often cannot Share,
+	and swallowing that error is what blocked Super HOD in team-lead testing.
+	"""
+	if not doc.name:
+		return
 	users = _users_with_roles(["Super HOD", "HR Manager"])
 	for user in users:
 		if user in ("Administrator", "Guest"):
@@ -368,19 +374,11 @@ def share_doc_with_super_hod(doc):
 				share=1,
 				flags={"ignore_share_permission": True},
 			)
-		except TypeError:
-			frappe.share.add(
-				doc.doctype,
-				doc.name,
-				user,
-				read=1,
-				write=1,
-				submit=1,
-				share=1,
-				notify=0,
-			)
 		except Exception:
-			pass
+			frappe.log_error(
+				title="Super HOD share failed",
+				message=frappe.get_traceback(),
+			)
 
 
 def _notify_super_hod_approvers(doc):

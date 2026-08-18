@@ -622,10 +622,10 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 
 
 def _purge_existing_test_leaves(employee):
-	"""Remove leftover E2E leave docs so re-runs do not hit overlap errors."""
+	"""Remove leftover E2E/QA leave docs so re-runs do not hit overlap errors."""
 	names = frappe.get_all(
 		"Leave Application",
-		filters={"employee": employee, "description": ["like", "E2E%"]},
+		filters={"employee": employee},
 		pluck="name",
 	)
 	_cleanup_leaves(names)

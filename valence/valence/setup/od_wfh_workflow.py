@@ -23,6 +23,7 @@ from valence.valence.setup.leave_workflow import (
 	STATE_PENDING_HOD,
 	STATE_PENDING_SUPER_HOD,
 	STATE_REJECTED,
+	_ensure_employee_field_ignores_user_permissions,
 	_ensure_roles,
 	_ensure_threshold_setting,
 	_ensure_workflow_actions,
@@ -49,6 +50,7 @@ def ensure_od_wfh_workflow():
 	_ensure_workflow_states()
 	_ensure_workflow_actions()
 	_ensure_approver_permissions()
+	_ensure_employee_field_ignores_user_permissions(DOCTYPE)
 	_ensure_workflow()
 	frappe.clear_cache()
 	frappe.db.commit()

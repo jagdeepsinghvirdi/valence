@@ -63,21 +63,30 @@ def run():
 
 	user_a = "e2e.dept.a@valence.test"
 	user_b = "e2e.dept.b@valence.test"
+	user_hod = "e2e.dept.hod@valence.test"
 	_ensure_user(user_a, "Dept", "A", ["Employee"])
 	_ensure_user(user_b, "Dept", "B", ["Employee"])
+	_ensure_user(user_hod, "Dept", "HOD", ["Employee", "Leave Approver"])
 
 	emp_a = _ensure_employee("E2E Dept A Emp", user_a, company, dept_a)
 	emp_b = _ensure_employee("E2E Dept B Emp", user_b, company, dept_b)
-	ok("Employees linked to departments", bool(emp_a and emp_b), f"{emp_a} / {emp_b}")
+	emp_hod = _ensure_employee("E2E Dept A HOD", user_hod, company, dept_a)
+	ok(
+		"Employees linked to departments",
+		bool(emp_a and emp_b and emp_hod),
+		f"{emp_a} / {emp_b} / {emp_hod}",
+	)
 
 	q_a = leave_application_query(user_a)
 	q_b = leave_application_query(user_b)
-	ok("Dept A user gets a restrictive query", bool(q_a) and dept_a in q_a, q_a[:160])
-	ok("Dept B user gets a restrictive query", bool(q_b) and dept_b in q_b, q_b[:160])
-	ok("Dept A query mentions dept A", dept_a in q_a)
-	ok("Dept A query does not mention dept B only as filter", dept_b not in q_a)
+	q_hod = leave_application_query(user_hod)
+	ok("Employee query is restricted to own requests", bool(q_a) and emp_a in q_a, q_a[:160])
+	ok("Employee query does not include department-wide access", dept_a not in q_a)
+	ok("Other-dept employee query does not mention dept A", dept_a not in q_b and emp_a not in q_b)
+	ok("HOD query includes own department", bool(q_hod) and dept_a in q_hod, q_hod[:160])
+	ok("HOD query does not include other department", dept_b not in q_hod)
 
-	# 4) has_permission by department
+	# 4) has_permission: Employee = own; HOD = department
 	fake_a = frappe._dict(
 		{
 			"doctype": "Leave Application",
@@ -97,12 +106,36 @@ def run():
 		}
 	)
 	ok(
-		"Dept A user can read same-dept leave",
+		"Employee can read own leave",
 		leave_application_has_permission(fake_a, "read", user_a) is True,
 	)
 	ok(
-		"Dept A user cannot read other-dept leave",
+		"Employee cannot read a colleague's leave in the same department",
+		leave_application_has_permission(
+			frappe._dict(
+				{
+					"employee": emp_hod,
+					"department": dept_a,
+					"leave_approver": None,
+					"owner": "nobody@example.com",
+				}
+			),
+			"read",
+			user_a,
+		)
+		is False,
+	)
+	ok(
+		"Employee cannot read other-dept leave",
 		leave_application_has_permission(fake_b, "read", user_a) is False,
+	)
+	ok(
+		"HOD can read same-dept leave",
+		leave_application_has_permission(fake_a, "read", user_hod) is True,
+	)
+	ok(
+		"HOD cannot read other-dept leave",
+		leave_application_has_permission(fake_b, "read", user_hod) is False,
 	)
 	ok(
 		"Leave approver can read cross-dept leave",

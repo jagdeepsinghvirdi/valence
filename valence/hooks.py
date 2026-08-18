@@ -141,10 +141,12 @@ after_migrate = [
 # #5 Department-wise Leave Access Control
 permission_query_conditions = {
 	"Leave Application": "valence.valence.override.query.leave_application_query",
+	"Attendance Request": "valence.valence.override.query.attendance_request_query",
 }
 
 has_permission = {
 	"Leave Application": "valence.valence.override.query.leave_application_has_permission",
+	"Attendance Request": "valence.valence.override.query.attendance_request_has_permission",
 }
 
 # DocType Class

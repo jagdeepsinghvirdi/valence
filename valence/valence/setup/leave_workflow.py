@@ -72,6 +72,7 @@ def ensure_leave_application_workflow():
 	_ensure_workflow_states()
 	_ensure_workflow_actions()
 	_ensure_super_hod_permissions()
+	_ensure_employee_field_ignores_user_permissions("Leave Application")
 	_ensure_workflow()
 	frappe.clear_cache()
 	frappe.db.commit()
@@ -194,6 +195,43 @@ def _ensure_super_hod_permissions():
 		except Exception:
 			# Property may already be set or type-restricted
 			pass
+
+
+def _ensure_employee_field_ignores_user_permissions(dt: str):
+	"""Stop Employee User Permissions from hiding Leave / OD / WFH from Super HOD.
+
+	Creating an Employee with 'Create User Permission' restricts that user to
+	their own Employee on every Link field. Super HOD then cannot open another
+	person's Leave Application even with role perms. Department-wise access is
+	already enforced by permission_query_conditions / has_permission.
+	"""
+	if not frappe.db.exists("DocType", dt):
+		return
+	if not frappe.get_meta(dt).has_field("employee"):
+		return
+
+	filters = {
+		"doc_type": dt,
+		"field_name": "employee",
+		"property": "ignore_user_permissions",
+	}
+	name = frappe.db.exists("Property Setter", filters)
+	if name:
+		frappe.db.set_value("Property Setter", name, "value", "1", update_modified=False)
+		return
+
+	frappe.get_doc(
+		{
+			"doctype": "Property Setter",
+			"doctype_or_field": "DocField",
+			"doc_type": dt,
+			"field_name": "employee",
+			"property": "ignore_user_permissions",
+			"property_type": "Check",
+			"value": "1",
+			"module": "Valence",
+		}
+	).insert(ignore_permissions=True)
 
 
 def _ensure_workflow_states():

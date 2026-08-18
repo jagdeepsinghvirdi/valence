@@ -1,10 +1,10 @@
 """
 #7 OD/WFH rules on standard Attendance Request (Work From Home / On Duty).
 
-Aligned with Leave Application routing:
-- Working days exclude holidays + week offs
-- Super HOD when backdated AND working days > Attendance Settings threshold
-- Future / same-day OD/WFH is HOD-only
+- Working days exclude holidays + week offs (informational)
+- Every OD/WFH request requires HOD then Super HOD (including half-day / same-day)
+- Reason / explanation is mandatory
+- Employees cannot approve their own request
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from hrms.hr.utils import share_doc_with_approver
 from valence.valence.doc_events.leave_application import (
 	_users_with_roles,
 	count_working_leave_days,
+	share_doc_with_super_hod,
 	validate_leave_creation_window,
 )
 from valence.valence.setup.leave_workflow import (
@@ -120,7 +121,7 @@ def validate_no_self_approval(doc):
 
 
 def notify_super_hod_if_needed(doc, method=None):
-	"""When HOD routes a long OD/WFH to Super HOD, create ToDos for Super HOD / HR."""
+	"""When HOD routes OD/WFH to Super HOD, share the doc and create ToDos."""
 	if doc.get("workflow_state") != SUPER_HOD_STATE:
 		return
 
@@ -128,6 +129,7 @@ def notify_super_hod_if_needed(doc, method=None):
 	if before and before.get("workflow_state") == SUPER_HOD_STATE:
 		return
 
+	share_doc_with_super_hod(doc)
 	_notify_super_hod_approvers(doc)
 
 

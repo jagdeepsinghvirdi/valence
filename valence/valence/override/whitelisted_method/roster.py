@@ -29,12 +29,14 @@ def get_weekly_offs(month_start, month_end, employee_filters):
     weekly_offs = {}
 
     for emp in employees:
-        assignments = frappe.get_all(
-            "Shift Assignment",
-            filters={"employee": emp.name, "start_date": ["<=", end], "docstatus": 1},
-            or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
-            fields=["custom_off_day"],
-        )
+        assignments = []
+        if frappe.db.has_column("Shift Assignment", "custom_off_day"):
+            assignments = frappe.get_all(
+                "Shift Assignment",
+                filters={"employee": emp.name, "start_date": ["<=", end], "docstatus": 1},
+                or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
+                fields=["custom_off_day"],
+            )
         off_weekday = None
         for a in assignments:
             if a.custom_off_day:

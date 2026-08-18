@@ -122,6 +122,58 @@ def run():
 			f"state={future_long.workflow_state} status={future_long.status}",
 		)
 
+		# ------ BACKDATED 3 WORKING DAYS: Super HOD (3 or more) ------
+		three = _new_leave(
+			actors["employee"]["employee"],
+			leave_type,
+			days=3,
+			description="E2E backdated 3-day leave",
+			start_offset=BACKDATED_LONG_OFFSET - 10,
+		)
+		created_names.append(three.name)
+
+		with _as_user(EMP_USER):
+			apply_workflow(frappe.get_doc("Leave Application", three.name), "Apply")
+		with _as_user(HOD_USER):
+			apply_workflow(frappe.get_doc("Leave Application", three.name), "Approve")
+
+		three.reload()
+		ok(
+			"Backdated 3 days: HOD Approve → Pending Super HOD",
+			three.workflow_state == STATE_PENDING_SUPER_HOD and three.docstatus == 0,
+			f"state={three.workflow_state} status={three.status}",
+		)
+
+		# Super HOD must be able to OPEN the document (tester defect: permission denied)
+		open_ok = True
+		open_err = ""
+		with _as_user(SUPER_HOD_USER):
+			try:
+				frappe.get_doc("Leave Application", three.name)
+			except Exception as e:
+				open_ok = False
+				open_err = str(e)[:160]
+		ok("Super HOD can open leave at Pending Super HOD", open_ok, open_err)
+
+		shared = frappe.db.exists(
+			"DocShare",
+			{
+				"share_doctype": "Leave Application",
+				"share_name": three.name,
+				"user": SUPER_HOD_USER,
+			},
+		)
+		ok("Leave is shared with Super HOD user", bool(shared), str(shared))
+
+		with _as_user(SUPER_HOD_USER):
+			apply_workflow(frappe.get_doc("Leave Application", three.name), "Approve")
+		three.reload()
+		ok(
+			"Backdated 3 days: Super HOD Approve → Approved",
+			three.workflow_state == STATE_APPROVED and three.docstatus == 1,
+			f"state={three.workflow_state}",
+		)
+
 		# ------ BACKDATED LONG LEAVE (> 3 working days): apply → HOD → Super HOD → Approved ------
 		long = _new_leave(
 			actors["employee"]["employee"],

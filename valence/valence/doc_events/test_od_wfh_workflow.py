@@ -13,8 +13,6 @@ from valence.valence.setup.leave_workflow import (
 	STATE_PENDING_SUPER_HOD,
 )
 from valence.valence.setup.od_wfh_workflow import (
-	COND_LONG,
-	COND_SHORT,
 	DOCTYPE,
 	WORKING_REQUEST_DAYS_FIELD,
 	WORKFLOW_NAME,
@@ -69,45 +67,36 @@ def run():
 	ok("Has Super HOD pending state", STATE_PENDING_SUPER_HOD in state_names)
 	ok("Has Approved state (submitted)", STATE_APPROVED in state_names)
 
-	short_rows = [
+	hod_approve = [
 		t
 		for t in wf.transitions
-		if t.state == STATE_PENDING_HOD
-		and t.action == "Approve"
-		and t.next_state == STATE_APPROVED
-		and t.condition
+		if t.state == STATE_PENDING_HOD and t.action == "Approve"
 	]
-	long_rows = [
-		t
-		for t in wf.transitions
-		if t.state == STATE_PENDING_HOD
-		and t.action == "Approve"
-		and t.next_state == STATE_PENDING_SUPER_HOD
-		and t.condition
-	]
-	ok("HOD short Approve path exists", len(short_rows) >= 1)
-	ok("HOD long → Super HOD path exists", len(long_rows) >= 1)
+	ok("HOD Approve path exists", len(hod_approve) >= 1)
 	ok(
-		"Short condition uses working days + threshold",
-		COND_SHORT in (short_rows[0].condition if short_rows else ""),
-		short_rows[0].condition if short_rows else "",
+		"Every HOD Approve goes to Super HOD (mandatory for all OD/WFH)",
+		all(t.next_state == STATE_PENDING_SUPER_HOD for t in hod_approve),
+		str({t.allowed: t.next_state for t in hod_approve}),
 	)
 	ok(
-		"Long condition uses backdated + working days + threshold",
-		COND_LONG in (long_rows[0].condition if long_rows else ""),
-		long_rows[0].condition if long_rows else "",
+		"HOD Approve has no length/date condition",
+		all(not (t.condition or "").strip() for t in hod_approve),
+		hod_approve[0].condition if hod_approve else "",
 	)
 	ok(
-		"Long condition requires backdated from_date",
-		"from_date" in (long_rows[0].condition if long_rows else "")
-		and "now_datetime" in (long_rows[0].condition if long_rows else ""),
-	)
-	ok(
-		"Conditions reference Attendance Settings threshold",
-		"super_hod_working_days_threshold" in (short_rows[0].condition if short_rows else ""),
+		"No HOD Approve → Approved shortcut",
+		not any(t.next_state == STATE_APPROVED for t in hod_approve),
 	)
 
-	# No self-approval on approve transitions
+	super_approve = [
+		t
+		for t in wf.transitions
+		if t.state == STATE_PENDING_SUPER_HOD
+		and t.action == "Approve"
+		and t.next_state == STATE_APPROVED
+	]
+	ok("Super HOD Approve → Approved path exists", len(super_approve) >= 1)
+
 	self_ok = all(
 		not cint(t.allow_self_approval)
 		for t in wf.transitions
@@ -136,7 +125,6 @@ def run():
 	ok("Explanation validator importable", callable(validate_mandatory_explanation))
 	ok("Self-approval validator importable", callable(validate_no_self_approval))
 
-	# Explanation required
 	threw = False
 	try:
 		doc = frappe._dict(

@@ -1,16 +1,16 @@
 """
 #3 / #4 Leave Application approval routing (Track B)
 
-- Backdated leave is allowed only within Attendance Settings → Backdated Creation
-  Window (Days) counted from the leave end date (calendar days, default 3).
-  This is a creation rule, not approval.
+- Backdated leave is allowed only within Attendance Settings → Backdated
+  Creation Window (Days) counted from the leave START date (calendar days,
+  default 3 = 72 hours). This is a creation rule, not approval.
 - Future / same-day leave is HOD-only (no Super HOD), regardless of length.
 - Super HOD applies only to backdated leave (from_date before today).
 - Working leave days exclude holidays + week offs.
 - Super HOD threshold is configurable in Attendance Settings → Super HOD After
-  Working Days (default 3). HOD / Super HOD / HR can change it.
-- Backdated + working days ≤ threshold → HOD Approve → Approved
-- Backdated + working days > threshold → HOD Approve → Pending Super HOD → Super HOD Approve
+  Working Days (default 3). 3 working days or more need Super HOD.
+- Backdated + working days < threshold → HOD Approve → Approved
+- Backdated + working days >= threshold → HOD Approve → Pending Super HOD → Super HOD Approve
 """
 
 from __future__ import annotations
@@ -52,11 +52,11 @@ COND_NOT_BACKDATED = (
 )
 COND_SHORT = (
 	f"({COND_NOT_BACKDATED}) or "
-	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) <= {_THRESHOLD_EXPR})"
+	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) < {_THRESHOLD_EXPR})"
 )
 COND_LONG = (
 	f"({COND_BACKDATED}) and "
-	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) > {_THRESHOLD_EXPR})"
+	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) >= {_THRESHOLD_EXPR})"
 )
 
 
@@ -83,7 +83,10 @@ def get_super_hod_working_days_threshold() -> int:
 
 
 def get_leave_creation_window_days() -> int:
-	"""Calendar-day window from end date for creating backdated Leave / OD / WFH. Default 3."""
+	"""Calendar-day window from start date for creating backdated Leave / OD / WFH.
+
+	Default 3 days = 72 hours.
+	"""
 	return _positive_int_setting(CREATION_WINDOW_FIELD, DEFAULT_CREATION_WINDOW)
 
 
@@ -133,7 +136,7 @@ def _ensure_working_leave_days_field():
 			(
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Super HOD only for backdated leave above the threshold. "
+				"(default 3). Super HOD for backdated leave of 3 working days or more. "
 				"Future / same-day leave needs only HOD, regardless of length. "
 				"Backdated leave is allowed."
 			),
@@ -155,7 +158,7 @@ def _ensure_working_leave_days_field():
 			"description": (
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Super HOD only for backdated leave above the threshold. "
+				"(default 3). Super HOD for backdated leave of 3 working days or more. "
 				"Future / same-day leave needs only HOD, regardless of length. "
 				"Backdated leave is allowed."
 			),
@@ -185,7 +188,7 @@ def _ensure_super_hod_permissions():
 	):
 		add_permission("Leave Application", ROLE_SUPER_HOD, 0)
 
-	for prop in ("read", "write", "submit", "cancel", "email", "print", "share"):
+	for prop in ("read", "write", "submit", "cancel", "email", "print", "share", "select"):
 		try:
 			update_permission_property("Leave Application", ROLE_SUPER_HOD, 0, prop, 1)
 		except Exception:
@@ -265,7 +268,7 @@ def _ensure_workflow():
 			0,
 			ROLE_SUPER_HOD,
 			"Open",
-			"Awaiting Super HOD (backdated leave above Attendance Settings threshold)",
+			"Awaiting Super HOD (backdated leave of 3+ working days)",
 		),
 		_state_row(STATE_APPROVED, 1, "HR Manager", "Approved", "Leave approved"),
 		_state_row(STATE_REJECTED, 1, "HR Manager", "Rejected", "Leave rejected"),

@@ -58,10 +58,11 @@ def set_working_leave_days(doc, method=None):
 	- Holidays (Holiday List)
 	- Weekly offs (Holiday List weekly_off + Shift Assignment custom_off_day)
 
-	Backdated leave is allowed (no advance-notice block). Super HOD uses this
-	field only when from_date is before today AND working days > Attendance
-	Settings → Super HOD After Working Days (configurable). Future / same-day
-	leave is HOD-only.
+	Backdated leave is allowed only within the 72-hour / creation-window rule
+	(see validate_leave_creation_window). Super HOD uses this field when
+	from_date is before today AND working days >= Attendance Settings →
+	Super HOD After Working Days (configurable, default 3 = 3 days or more).
+	Future / same-day leave is HOD-only.
 	"""
 	if not doc.meta.has_field(WORKING_LEAVE_DAYS_FIELD):
 		return
@@ -161,11 +162,12 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 
 def validate_leave_creation_window(doc, method=None):
 	"""
-	3-day (configurable) window applies only when creating / changing to_date.
+	72-hour window (configurable as calendar days, default 3) on the leave /
+	request START date.
 
-	Employee may create backdated Leave or OD/WFH only if to_date (end date) is
-	within Attendance Settings → Backdated Creation Window (Days). Approval has
-	no time limit — HOD / Super HOD can approve anytime.
+	Employees cannot apply Leave or OD/WFH if from_date is more than the window
+	in the past. Default 3 days = 72 hours. Approval has no time limit —
+	HOD / Super HOD can approve anytime. HR roles can override.
 	"""
 	if getattr(frappe.flags, "ignore_leave_creation_window", False):
 		return
@@ -173,47 +175,53 @@ def validate_leave_creation_window(doc, method=None):
 	if _is_hr_user():
 		return
 
-	if not doc.to_date:
+	if not doc.from_date:
 		return
 
-	# Approval and other updates: skip if end date did not change
+	# Approval and other updates: skip if start date did not change
 	if not doc.is_new():
 		before = doc.get_doc_before_save()
-		if before and before.to_date and getdate(before.to_date) == getdate(doc.to_date):
+		if before and before.from_date and getdate(before.from_date) == getdate(doc.from_date):
 			return
 
 	from valence.valence.setup.leave_workflow import get_leave_creation_window_days
 
 	window = get_leave_creation_window_days()
-	to_date = getdate(doc.to_date)
+	from_date = getdate(doc.from_date)
 	today = getdate()
-	if to_date >= today:
+	if from_date >= today:
 		return
 
 	earliest = add_days(today, -window)
-	if to_date < earliest:
+	if from_date < earliest:
 		kind = _("leave") if doc.doctype == "Leave Application" else _("OD/WFH request")
+		hours = window * 24
 		frappe.throw(
 			_(
-				"Backdated {0} can be created only within {1} days of the end date. "
-				"Earliest allowed end date is {2}."
-			).format(kind, frappe.bold(window), formatdate(earliest)),
-			title=_("Creation Window Exceeded"),
+				"{0} cannot be applied for a date more than {1} days ({2} hours) in the past. "
+				"Earliest allowed start date is {3}."
+			).format(
+				kind.capitalize(),
+				frappe.bold(window),
+				frappe.bold(hours),
+				formatdate(earliest),
+			),
+			title=_("72-Hour Window Exceeded"),
 		)
 
 
 
 def needs_super_hod_approval(working_days, from_date=None) -> bool:
-	"""True only for backdated requests whose working days exceed the threshold.
+	"""True for backdated requests whose working days are at or above the threshold.
 
-	Future / same-day leave is HOD-only. If from_date is omitted, only the
-	working-day threshold is applied (used by length-only unit checks).
+	3 working days or more (default) need Super HOD. Future / same-day leave is
+	HOD-only. If from_date is omitted, only the working-day threshold is applied.
 	"""
 	from valence.valence.setup.leave_workflow import get_super_hod_working_days_threshold
 
 	if from_date is not None and getdate(from_date) >= getdate():
 		return False
-	return flt(working_days) > get_super_hod_working_days_threshold()
+	return flt(working_days) >= get_super_hod_working_days_threshold()
 
 
 def validate_no_leave_on_present_day(doc, method=None):
@@ -299,7 +307,8 @@ def validate_resigned_employee_leave_type(doc, method=None):
 def notify_super_hod_if_needed(doc, method=None):
 	"""
 	#4 Extended Leave Approval — when HOD sends a backdated leave (working days
-	above threshold) to Super HOD, create ToDos for Super HOD / HR Manager.
+	at or above threshold) to Super HOD, share the document and create ToDos.
+	Sharing is required so User Permissions on Employee cannot block Super HOD.
 	"""
 	if doc.get("workflow_state") != SUPER_HOD_STATE:
 		return
@@ -309,7 +318,39 @@ def notify_super_hod_if_needed(doc, method=None):
 	if before and before.get("workflow_state") == SUPER_HOD_STATE:
 		return
 
+	share_doc_with_super_hod(doc)
 	_notify_super_hod_approvers(doc)
+
+
+def share_doc_with_super_hod(doc):
+	"""Grant Super HOD / HR Manager access so they can open and approve the document."""
+	users = _users_with_roles(["Super HOD", "HR Manager"])
+	for user in users:
+		if user in ("Administrator", "Guest"):
+			continue
+		try:
+			frappe.share.add_docshare(
+				doc.doctype,
+				doc.name,
+				user,
+				write=1,
+				submit=1,
+				share=1,
+				flags={"ignore_share_permission": True},
+			)
+		except TypeError:
+			frappe.share.add(
+				doc.doctype,
+				doc.name,
+				user,
+				read=1,
+				write=1,
+				submit=1,
+				share=1,
+				notify=0,
+			)
+		except Exception:
+			pass
 
 
 def _notify_super_hod_approvers(doc):

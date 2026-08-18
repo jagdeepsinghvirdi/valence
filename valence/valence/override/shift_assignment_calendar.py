@@ -26,20 +26,23 @@ def get_shift_assignments(start: str, end: str, filters: str | list | None = Non
     filters.extend([["start_date", "<=", end], ["docstatus", "=", 1]])
     or_filters = [["end_date", ">=", start], ["end_date", "is", "not set"]]
 
+    fields = [
+        "name",
+        "start_date",
+        "end_date",
+        "employee_name",
+        "employee",
+        "shift_type",
+        "docstatus",
+    ]
+    if frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        fields.append("custom_off_day")
+
     return frappe.get_list(
         "Shift Assignment",
         filters=filters,
         or_filters=or_filters,
-        fields=[
-            "name",
-            "start_date",
-            "end_date",
-            "employee_name",
-            "employee",
-            "shift_type",
-            "custom_off_day",  # Added to fetch custom off days
-            "docstatus",
-        ],
+        fields=fields,
     )
 
 def get_holidays(company=None):
@@ -85,8 +88,9 @@ def get_shift_events(assignments: list[dict], company=None) -> list[dict]:
 
         # Convert `custom_off_day` to a list
         off_days = []
-        if d.custom_off_day:
-            off_days = [day.strip().lower() for day in d.custom_off_day.split(",")]
+        off_day = d.get("custom_off_day") if hasattr(d, "get") else getattr(d, "custom_off_day", None)
+        if off_day:
+            off_days = [day.strip().lower() for day in str(off_day).split(",")]
 
         while daily_event_start <= daily_event_end:
             start_timing = frappe.utils.get_datetime(daily_event_start) + shift_start
@@ -100,7 +104,8 @@ def get_shift_events(assignments: list[dict], company=None) -> list[dict]:
             event_title = f"{cstr(d.employee_name)}: {cstr(d.shift_type)}"
 
             # If it's an off day, change color to orange
-            if daily_event_start.strftime("%A") == d.custom_off_day:
+            weekday = daily_event_start.strftime("%A")
+            if weekday.lower() in off_days or weekday == off_day:
                 event_color = "#ffd1b3"
 
             # If it's a holiday, change color to green and show holiday description

@@ -79,16 +79,16 @@ def run():
 	prev = frappe.db.get_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD)
 	frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, 3)
 
-	ok("COND_SHORT true for backdated 3 days (threshold 3)", eval_cond(COND_SHORT, short_past) is True)
+	ok("COND_SHORT false for backdated 3 days (3+ needs Super HOD)", eval_cond(COND_SHORT, short_past) is False)
 	ok("COND_SHORT false for backdated 4 days (threshold 3)", eval_cond(COND_SHORT, long_past) is False)
 	ok("COND_LONG true for backdated 4 days (threshold 3)", eval_cond(COND_LONG, long_past) is True)
-	ok("COND_LONG false for backdated 3 days (threshold 3)", eval_cond(COND_LONG, short_past) is False)
+	ok("COND_LONG true for backdated 3 days (3 or more)", eval_cond(COND_LONG, short_past) is True)
 	ok("COND_SHORT true for future 4 days (no Super HOD)", eval_cond(COND_SHORT, long_future) is True)
 	ok("COND_LONG false for future 4 days", eval_cond(COND_LONG, long_future) is False)
 	ok("COND_SHORT true for same-day 4 days", eval_cond(COND_SHORT, long_today) is True)
 	ok("COND_LONG false for same-day 4 days", eval_cond(COND_LONG, long_today) is False)
 	ok("COND_SHORT true for backdated half day", eval_cond(COND_SHORT, half_past) is True)
-	ok("needs_super_hod False for 3 @ threshold 3", needs_super_hod_approval(3) is False)
+	ok("needs_super_hod True for 3 @ threshold 3", needs_super_hod_approval(3) is True)
 	ok("needs_super_hod True for 4 @ threshold 3 (no date)", needs_super_hod_approval(4) is True)
 	ok(
 		"needs_super_hod False for future 4 days",
@@ -102,7 +102,7 @@ def run():
 	# Customize threshold to 5 → 4 days should NOT need Super HOD
 	frappe.db.set_single_value(SETTINGS_DOCTYPE, THRESHOLD_FIELD, 5)
 	ok("Configurable: threshold 5 → 4 days no Super HOD", needs_super_hod_approval(4) is False)
-	ok("Configurable: threshold 5 → 6 days needs Super HOD", needs_super_hod_approval(6) is True)
+	ok("Configurable: threshold 5 → 5 days needs Super HOD", needs_super_hod_approval(5) is True)
 	ok(
 		"Workflow COND_LONG respects threshold 5 (backdated 4 days)",
 		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4, "from_date": past})) is False,
@@ -161,7 +161,7 @@ def run():
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print("Rule: future/same-day → HOD only; backdated ≤ threshold → HOD; backdated above → Super HOD.")
+	print("Rule: future/same-day → HOD only; backdated < threshold → HOD; backdated >= threshold → Super HOD.")
 	print("Threshold is configurable by HR / Leave Approver / Super HOD.")
 	if failed:
 		frappe.throw(

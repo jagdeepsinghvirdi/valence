@@ -102,7 +102,8 @@ after_migrate = [
     "valence.valence.setup.leave_workflow.after_migrate",
     "valence.valence.setup.od_wfh_workflow.after_migrate",
     "valence.valence.monkey_patch.chemical_stock_entry.after_migrate",
-    "valence.valence.setup.short_leave_workflow.after_migrate",   
+    "valence.valence.setup.short_leave_workflow.after_migrate",
+    "valence.valence.doc_events.shift_assignment.after_migrate",
 ]
 
 # Uninstallation

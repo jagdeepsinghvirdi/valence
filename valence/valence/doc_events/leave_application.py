@@ -202,6 +202,7 @@ def validate_leave_creation_window(doc, method=None):
 		)
 
 
+
 def needs_super_hod_approval(working_days, from_date=None) -> bool:
 	"""True only for backdated requests whose working days exceed the threshold.
 

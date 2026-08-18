@@ -99,9 +99,10 @@ jinja = {
 # before_install = "valence.install.before_install"
 # after_install = "valence.install.after_install"
 after_migrate = [
-	"valence.valence.setup.leave_workflow.after_migrate",
-	"valence.valence.setup.od_wfh_workflow.after_migrate",
-	"valence.valence.monkey_patch.chemical_stock_entry.after_migrate",
+    "valence.valence.setup.leave_workflow.after_migrate",
+    "valence.valence.setup.od_wfh_workflow.after_migrate",
+    "valence.valence.monkey_patch.chemical_stock_entry.after_migrate",
+    "valence.valence.setup.short_leave_workflow.after_migrate",   
 ]
 
 # Uninstallation
@@ -233,6 +234,14 @@ doc_events = {
       "validate": "valence.valence.doc_events.attendance_request.validate",
       "on_update": "valence.valence.doc_events.attendance_request.on_update",
   },
+   "Short Leave Application": {
+        "validate": "valence.valence.doc_events.short_leave_application.validate",
+        "before_submit": "valence.valence.doc_events.short_leave_application.before_submit",
+        "on_update": "valence.valence.doc_events.short_leave_application.on_update",
+    },
+  "Quarterly Working Days": {
+    "on_update": "valence.valence.tasks.leave_balance_update.credit_leave_from_qwd",
+   },
 
 }
 
@@ -280,6 +289,7 @@ fixtures = [
                     "Draft",
                     "Pending HOD Approval",
                     "Pending Super HOD Approval",
+                    "Pending Approval",
                     "Approved",
                     "Rejected",
                 ],
@@ -292,7 +302,7 @@ fixtures = [
     },
     {
         "dt": "Workflow",
-        "filters": [["name", "in", ["Leave Application Approval", "OD WFH Request Approval"]]],
+        "filters": [["name", "in", ["Leave Application Approval", "OD WFH Request Approval", "Short Leave Application Approval"]]],
     },
 ]
 # Testing

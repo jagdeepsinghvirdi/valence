@@ -11,12 +11,18 @@
   "short_leave_in_month",
   "leave_approval_section",
   "leave_creation_window_days",
-  "super_hod_working_days_threshold"
+  "super_hod_working_days_threshold",
+  "short_leave_application_section",
+  "short_leave_max_duration_hours",
+  "column_break_slas1",
+  "short_leave_personal_monthly_cap",
+  "short_leave_official_monthly_cap"
  ],
  "fields": [
   {
    "fieldname": "section_break_fptb",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Automatic Short Leave (Point Deduction) — Legacy"
   },
   {
    "fieldname": "short_leave_logic",
@@ -31,10 +37,10 @@
   },
   {
    "default": "0",
-   "description": "If checked, apply late coming rules (Shift Management). Otherwise, use standard attendance logic.",
+   "description": "If checked, apply late coming rules (Shift Management) — the legacy automatic point-deduction system. Otherwise, use standard attendance logic. NOTE: as of Aug 2026 policy, this is being superseded by the Short Leave Application system below; leave unchecked on new setups.",
    "fieldname": "use_late_coming_rules",
    "fieldtype": "Check",
-   "label": "Use Late Coming Rules"
+   "label": "Use Late Coming Rules (Legacy)"
   },
   {
    "fieldname": "leave_approval_section",
@@ -58,13 +64,49 @@
    "label": "Super HOD After Working Days",
    "non_negative": 1,
    "reqd": 1
+  },
+  {
+   "fieldname": "short_leave_application_section",
+   "fieldtype": "Section Break",
+   "label": "Short Leave Application Settings"
+  },
+  {
+   "default": "2",
+   "description": "Maximum duration allowed for a single Short Leave Application. Requests longer than this are blocked and must instead be applied as Half Day / Full Day Leave.",
+   "fieldname": "short_leave_max_duration_hours",
+   "fieldtype": "Float",
+   "label": "Max Duration Per Short Leave (Hours)",
+   "non_negative": 1,
+   "precision": "1",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_slas1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "2",
+   "description": "Maximum number of Personal Short Leaves an employee can apply for in a calendar month.",
+   "fieldname": "short_leave_personal_monthly_cap",
+   "fieldtype": "Int",
+   "label": "Personal Short Leave — Monthly Cap",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Maximum number of Official Short Leaves per calendar month. Set to 0 for unlimited (current policy: unlimited).",
+   "fieldname": "short_leave_official_monthly_cap",
+   "fieldtype": "Int",
+   "label": "Official Short Leave — Monthly Cap (0 = Unlimited)",
+   "non_negative": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-17 20:30:00.000000",
+ "modified": "2026-08-18 10:31:00.000000",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Attendance Settings",

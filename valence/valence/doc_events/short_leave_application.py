@@ -4,12 +4,16 @@ Short Leave Application — employee-initiated, portal-applied short leave.
 This is deliberately separate from the existing point-based auto-deduction
 system (Short Leave Ledger + Short Leave Logic, driven by Attendance Settings
 .use_late_coming_rules). That system reacts passively to punch times; this one
-is an active employee request, per the corrected #6 policy (Aug 2026):
+is an active employee request, per the corrected #6 policy (Aug 2026,
+updated after client review of the demo):
 
-  - Official Short Leave: no monthly cap by default (configurable).
-  - Personal Short Leave: capped per month (default 2, configurable).
-  - Duration capped per request (default 2 hrs, configurable) — beyond that,
-    the employee must apply Half Day / Full Day Leave instead.
+  - Personal Short Leave: duration capped per request (default 2 hrs,
+    configurable) — beyond that, the employee must apply Half Day / Full
+    Day Leave instead. Also capped per month (default 2, configurable).
+  - Official Short Leave: NO duration cap, NO monthly cap — still logged
+    and counted for records, just not limited.
+  - Only ONE Short Leave Application allowed per employee per day, any
+    type.
   - Single-level approval by the Reporting Head (Leave Approver role).
 
 ALL of the numbers above live on Attendance Settings, not hardcoded here, so
@@ -34,6 +38,7 @@ def validate(doc, method=None):
 	restrict_employee_to_self_for_regular_employees(doc)
 	set_duration(doc)
 	validate_duration_against_settings(doc)
+	validate_one_per_day(doc)
 	validate_monthly_cap(doc)
 	set_defaults(doc)
 
@@ -121,6 +126,13 @@ def set_duration(doc):
 
 
 def validate_duration_against_settings(doc):
+	# Duration cap applies to Personal only. Official Short Leave has no
+	# duration limit — confirmed policy: "for
+	# official short leave no capping of 2 hrs and counts in month." It's
+	# still logged/tracked (counted for records), just not limited.
+	if doc.short_leave_type == "Official":
+		return
+
 	# 0 / blank is treated as "not configured yet" here, not "zero allowed" —
 	# a Single doctype doesn't backfill field defaults on existing records,
 	# so a freshly migrated site can have this sitting at 0 until HR saves it.
@@ -135,6 +147,32 @@ def validate_duration_against_settings(doc):
 				"not count against your Short Leave limit."
 			).format(doc.duration_hours, max_hours),
 			title=_("Duration Exceeds Limit"),
+		)
+
+
+def validate_one_per_day(doc):
+	"""Only one Short Leave Application per employee per day, any type."""
+	if not doc.employee or not doc.date:
+		return
+
+	existing = frappe.get_all(
+		"Short Leave Application",
+		filters={
+			"employee": doc.employee,
+			"date": doc.date,
+			"docstatus": ["!=", 2],
+			"name": ["!=", doc.name or ""],
+		},
+		pluck="name",
+	)
+
+	if existing:
+		frappe.throw(
+			_(
+				"{0} already has a Short Leave Application on {1} ({2}). "
+				"Only one Short Leave is allowed per day."
+			).format(doc.employee_name or doc.employee, doc.date, existing[0]),
+			title=_("Short Leave Already Applied For This Date"),
 		)
 
 
@@ -205,15 +243,21 @@ def sync_status_from_workflow(doc):
 def share_with_approver(doc):
 	if not doc.leave_approver:
 		return
-	# Enqueue in the background — sharing can trigger an email notification via
-	# hrms.hr.utils.share_doc_with_approver, and a slow/misconfigured SMTP
-	# connection must never be allowed to hang the user's save request.
-	frappe.enqueue(
-		"valence.valence.doc_events.short_leave_application._share_with_approver_now",
-		queue="short",
-		doctype=doc.doctype,
-		docname=doc.name,
-		approver=doc.leave_approver,
+	# Enqueue only after the current transaction actually commits. Without
+	# this, the background worker can (and reliably does, in practice) pick
+	# up the job and call frappe.get_doc() before this transaction's INSERT
+	# is visible on the worker's own DB connection, raising a
+	# DoesNotExistError that gets silently swallowed by the try/except in
+	# _share_with_approver_now — leaving the approver un-shared with no
+	# visible error anywhere except Error Log.
+	frappe.db.after_commit.add(
+		lambda: frappe.enqueue(
+			"valence.valence.doc_events.short_leave_application._share_with_approver_now",
+			queue="short",
+			doctype=doc.doctype,
+			docname=doc.name,
+			approver=doc.leave_approver,
+		)
 	)
 
 
@@ -224,8 +268,10 @@ def _share_with_approver_now(doctype, docname, approver):
 		doc = frappe.get_doc(doctype, docname)
 		share_doc_with_approver(doc, approver)
 	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Short Leave Application: share_with_approver failed")
-
+		frappe.log_error(
+			title="Short Leave Application: share_with_approver failed",
+			message=frappe.get_traceback(),
+		)
 
 def get_setting(fieldname, default):
 	value = frappe.db.get_single_value("Attendance Settings", fieldname)

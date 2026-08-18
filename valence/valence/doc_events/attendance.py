@@ -1,6 +1,34 @@
 import frappe
-from frappe.utils import getdate, nowdate, add_days, get_first_day, get_last_day
+from frappe.utils import getdate, nowdate, add_days, get_first_day, get_last_day, flt
 from datetime import datetime, timedelta
+
+
+def get_approved_official_short_leave_hours(employee, attendance_date):
+    """
+    Sum of duration_hours from APPROVED Official Short Leave Applications
+    for this employee on this date. Personal Short Leave is intentionally
+    excluded — confirmed policy: workhours-inclusion
+    applies to Official only ("This capping only for personal short leave.
+    These hours include in attendance workhours" — said in the context of
+    Official Short Leave).
+    """
+    if not employee or not attendance_date:
+        return 0
+
+    total = frappe.db.sql(
+        """
+        select sum(duration_hours)
+        from `tabShort Leave Application`
+        where employee=%s
+          and date=%s
+          and short_leave_type='Official'
+          and docstatus=1
+          and workflow_state='Approved'
+        """,
+        (employee, attendance_date),
+    )
+    return flt(total[0][0]) if total and total[0][0] else 0
+
 
 def set_status(self, method):
     if not self.in_time and self.out_time:
@@ -12,13 +40,36 @@ def set_status(self, method):
     elif self.attendance_request:
         self.db_set("status",frappe.db.get_value("Attendance Request",self.attendance_request,"reason"))
     elif not self.in_time and not self.out_time: 
-        from valence.api import get_offday_status     
-        if not self.in_time and not self.out_time:        
-            att_status = get_offday_status(self.employee,self.attendance_date,self.name)
-            if att_status:
-                self.db_set('status',att_status)       
-            else:
-                self.db_set('status',"No punch") 
+    from valence.api import get_offday_status
+
+    # Even with no punches, approved Official Short Leave hours should
+    # still count toward working_hours and be evaluated against the
+    # shift thresholds — otherwise they're silently dropped and the
+    # employee is left as "No punch" despite having logged hours.
+    official_short_leave_hours = get_approved_official_short_leave_hours(
+        self.employee, self.attendance_date
+    )
+
+    if official_short_leave_hours:
+        hours = round(official_short_leave_hours, 1)
+        self.db_set('working_hours', hours)
+
+        shift = frappe.get_doc("Shift Type", self.shift)
+        half_day_threshold = shift.working_hours_threshold_for_half_day or 0
+        absent_threshold = shift.working_hours_threshold_for_absent or 0
+
+        if hours < absent_threshold:
+            self.db_set('status', 'Absent')
+        elif hours < half_day_threshold:
+            self.db_set('status', 'Half Day')
+        else:
+            self.db_set('status', 'Present')
+    else:
+        att_status = get_offday_status(self.employee, self.attendance_date, self.name)
+        if att_status:
+            self.db_set('status', att_status)
+        else:
+            self.db_set('status', "No punch")
     elif self.in_time and self.out_time:
         
         FMT = "%Y-%m-%d %H:%M:%S"
@@ -38,8 +89,16 @@ def set_status(self, method):
 
         # Convert to decimal hours
         hours = round(duration_seconds / 3600, 1)  # One digit after point
-        # if not self.working_hours:
-        self.db_set('working_hours',hours)
+
+        # Approved Official Short Leave hours count toward working_hours
+        # (confirmed policy — Personal Short Leave does NOT do this)
+        official_short_leave_hours = get_approved_official_short_leave_hours(
+            self.employee, self.attendance_date
+        )
+        if official_short_leave_hours:
+            hours = round(hours + official_short_leave_hours, 1)
+
+        self.db_set('working_hours', hours)
 
         
         # Get shift thresholds
@@ -439,4 +498,3 @@ def process_attendance_offdays():
             )
         except Exception as e:
             frappe.log_error(frappe.get_traceback(), "Attendance Status Update Failed")
-    

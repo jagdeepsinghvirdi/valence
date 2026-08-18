@@ -31,88 +31,86 @@ def get_approved_official_short_leave_hours(employee, attendance_date):
 
 
 def set_status(self, method):
-    if not self.in_time and self.out_time:
-        self.db_set('status',"Mispunch") 
-    elif not self.out_time and self.in_time:
-        self.db_set('status',"Mispunch") 
-    # elif self.attendance_request and (self.in_time or self.out_time):
-    #     self.db_set("status","Present")
-    elif self.attendance_request:
-        self.db_set("status",frappe.db.get_value("Attendance Request",self.attendance_request,"reason"))
-    elif not self.in_time and not self.out_time: 
-    from valence.api import get_offday_status
+	if not self.in_time and self.out_time:
+		self.db_set('status',"Mispunch") 
+	elif not self.out_time and self.in_time:
+		self.db_set('status',"Mispunch") 
+	elif self.attendance_request:
+		self.db_set("status",frappe.db.get_value("Attendance Request",self.attendance_request,"reason"))
+	elif not self.in_time and not self.out_time: 
+		from valence.api import get_offday_status
 
-    # Even with no punches, approved Official Short Leave hours should
-    # still count toward working_hours and be evaluated against the
-    # shift thresholds — otherwise they're silently dropped and the
-    # employee is left as "No punch" despite having logged hours.
-    official_short_leave_hours = get_approved_official_short_leave_hours(
-        self.employee, self.attendance_date
-    )
+		# Even with no punches, approved Official Short Leave hours should
+		# still count toward working_hours and be evaluated against the
+		# shift thresholds - otherwise they're silently dropped and the
+		# employee is left as "No punch" despite having logged hours.
+		official_short_leave_hours = get_approved_official_short_leave_hours(
+			self.employee, self.attendance_date
+		)
 
-    if official_short_leave_hours:
-        hours = round(official_short_leave_hours, 1)
-        self.db_set('working_hours', hours)
+		if official_short_leave_hours:
+			hours = round(official_short_leave_hours, 1)
+			self.db_set('working_hours', hours)
 
-        shift = frappe.get_doc("Shift Type", self.shift)
-        half_day_threshold = shift.working_hours_threshold_for_half_day or 0
-        absent_threshold = shift.working_hours_threshold_for_absent or 0
+			shift = frappe.get_doc("Shift Type", self.shift)
+			half_day_threshold = shift.working_hours_threshold_for_half_day or 0
+			absent_threshold = shift.working_hours_threshold_for_absent or 0
 
-        if hours < absent_threshold:
-            self.db_set('status', 'Absent')
-        elif hours < half_day_threshold:
-            self.db_set('status', 'Half Day')
-        else:
-            self.db_set('status', 'Present')
-    else:
-        att_status = get_offday_status(self.employee, self.attendance_date, self.name)
-        if att_status:
-            self.db_set('status', att_status)
-        else:
-            self.db_set('status', "No punch")
-    elif self.in_time and self.out_time:
-        
-        FMT = "%Y-%m-%d %H:%M:%S"
+			if hours < absent_threshold:
+				self.db_set('status', 'Absent')
+			elif hours < half_day_threshold:
+				self.db_set('status', 'Half Day')
+			else:
+				self.db_set('status', 'Present')
+		else:
+			att_status = get_offday_status(self.employee,self.attendance_date,self.name)
+			if att_status:
+				self.db_set('status',att_status)       
+			else:
+				self.db_set('status',"No punch") 
+	elif self.in_time and self.out_time:
+		
+		FMT = "%Y-%m-%d %H:%M:%S"
 
-        if isinstance(self.in_time, str):
-            in_time = datetime.strptime(self.in_time, FMT)
-        else:
-            in_time = self.in_time
+		if isinstance(self.in_time, str):
+			in_time = datetime.strptime(self.in_time, FMT)
+		else:
+			in_time = self.in_time
 
-        if isinstance(self.out_time, str):
-            out_time = datetime.strptime(self.out_time, FMT)
-        else:
-            out_time = self.out_time
+		if isinstance(self.out_time, str):
+			out_time = datetime.strptime(self.out_time, FMT)
+		else:
+			out_time = self.out_time
 
-        # Get total seconds worked
-        duration_seconds = (out_time - in_time).total_seconds()
+		# Get total seconds worked
+		duration_seconds = (out_time - in_time).total_seconds()
 
-        # Convert to decimal hours
-        hours = round(duration_seconds / 3600, 1)  # One digit after point
+		# Convert to decimal hours
+		hours = round(duration_seconds / 3600, 1)  # One digit after point
 
-        # Approved Official Short Leave hours count toward working_hours
-        # (confirmed policy — Personal Short Leave does NOT do this)
-        official_short_leave_hours = get_approved_official_short_leave_hours(
-            self.employee, self.attendance_date
-        )
-        if official_short_leave_hours:
-            hours = round(hours + official_short_leave_hours, 1)
+		# Approved Official Short Leave hours count toward working_hours
+		# (confirmed policy - Personal Short Leave does NOT do this)
+		official_short_leave_hours = get_approved_official_short_leave_hours(
+			self.employee, self.attendance_date
+		)
+		if official_short_leave_hours:
+			hours = round(hours + official_short_leave_hours, 1)
 
-        self.db_set('working_hours', hours)
+		self.db_set('working_hours', hours)
 
-        
-        # Get shift thresholds
-        shift = frappe.get_doc("Shift Type", self.shift)
-        half_day_threshold = shift.working_hours_threshold_for_half_day or 0
-        absent_threshold = shift.working_hours_threshold_for_absent or 0
+		
+		# Get shift thresholds
+		shift = frappe.get_doc("Shift Type", self.shift)
+		half_day_threshold = shift.working_hours_threshold_for_half_day or 0
+		absent_threshold = shift.working_hours_threshold_for_absent or 0
 
-        # Decide status based on thresholds
-        if hours < absent_threshold:
-            self.db_set('status', 'Absent')
-        elif hours < half_day_threshold:
-            self.db_set('status', 'Half Day')
-        else:
-            self.db_set('status', 'Present')
+		# Decide status based on thresholds
+		if hours < absent_threshold:
+			self.db_set('status', 'Absent')
+		elif hours < half_day_threshold:
+			self.db_set('status', 'Half Day')
+		else:
+			self.db_set('status', 'Present')
 
 
 def set_short_leave_count(self, method):

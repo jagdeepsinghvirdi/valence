@@ -2,8 +2,8 @@
 #3 / #4 Leave Application approval routing (Track B)
 
 - Backdated leave is allowed only within Attendance Settings → Backdated
-  Creation Window (Days) counted from the leave START date (calendar days,
-  default 3 = 72 hours). This is a creation rule, not approval.
+  Creation Window (Days) counted from the leave START date in working days
+  (holidays + weekly offs excluded, default 3). This is a creation rule, not approval.
 - Future / same-day leave is HOD-only (no Super HOD), regardless of length.
 - Super HOD applies only to backdated leave (from_date before today).
 - Working leave days exclude holidays + week offs.
@@ -83,9 +83,9 @@ def get_super_hod_working_days_threshold() -> int:
 
 
 def get_leave_creation_window_days() -> int:
-	"""Calendar-day window from start date for creating backdated Leave / OD / WFH.
+	"""Working-day window from start date for creating backdated Leave / OD / WFH.
 
-	Default 3 days = 72 hours.
+	Holidays and weekly offs are excluded. Default 3.
 	"""
 	return _positive_int_setting(CREATION_WINDOW_FIELD, DEFAULT_CREATION_WINDOW)
 

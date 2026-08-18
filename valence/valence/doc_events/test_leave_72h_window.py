@@ -73,7 +73,7 @@ def run():
 			str(doc.get(WORKING_LEAVE_DAYS_FIELD)),
 		)
 
-	# 72-hour / 3-day window is for CREATION, counted from leave START date
+	# Creation window = 3 working days from START date (offs excluded)
 	with patch(
 		"valence.valence.doc_events.leave_application.frappe.get_roles",
 		return_value=["Employee"],
@@ -86,7 +86,7 @@ def run():
 		except Exception as e:
 			allowed = False
 			err = str(e)
-		ok("Create within 72 hours / 3 days of start date is allowed", allowed, err[:100])
+		ok("Create within 3 working days of start date is allowed", allowed, err[:100])
 
 		today_doc = make_doc(getdate(), getdate())
 		today_ok = True
@@ -102,21 +102,19 @@ def run():
 			validate_leave_creation_window(future_doc)
 		except Exception:
 			future_ok = False
-		ok("Future leave creation is not limited by 72-hour window", future_ok)
+		ok("Future leave creation is not limited by creation window", future_ok)
 
-		# Tester case: leave dated ~7 days in the past must be blocked
-		too_old = make_doc(add_days(getdate(), -7), add_days(getdate(), -7))
+		too_old = make_doc(add_days(getdate(), -14), add_days(getdate(), -14))
 		blocked = False
 		err = ""
 		try:
 			validate_leave_creation_window(too_old)
 		except Exception as e:
-			blocked = "72-Hour" in str(e) or "hours" in str(e).lower() or "past" in str(e).lower()
+			blocked = "Creation Window" in str(e) or "working days" in str(e).lower()
 			err = str(e)
-		ok("Create 7 days in the past is blocked (tester case)", blocked, err[:160])
+		ok("Create 14 calendar days in the past is blocked", blocked, err[:160])
 
-		# Start older than 3 days is blocked even if end date is recent
-		old_start = make_doc(add_days(getdate(), -10), add_days(getdate(), -1))
+		old_start = make_doc(add_days(getdate(), -14), add_days(getdate(), -1))
 		old_start_blocked = False
 		err = ""
 		try:
@@ -125,10 +123,31 @@ def run():
 			old_start_blocked = True
 			err = str(e)
 		ok(
-			"Start date older than 72 hours is blocked even if end date is recent",
+			"Start date older than 3 working days is blocked even if end date is recent",
 			old_start_blocked,
 			err[:120],
 		)
+
+		# Holidays / week offs in the gap do not count, so start can be further back
+		today = getdate()
+		offs = {add_days(today, -1), add_days(today, -2)}
+		holiday_start = make_doc(add_days(today, -5), add_days(today, -1))
+		with patch(
+			"valence.valence.doc_events.leave_application._get_non_working_dates",
+			return_value=offs,
+		):
+			holiday_ok = True
+			err = ""
+			try:
+				validate_leave_creation_window(holiday_start)
+			except Exception as e:
+				holiday_ok = False
+				err = str(e)
+			ok(
+				"Start further back is allowed when gap has week offs / holidays",
+				holiday_ok,
+				err[:120],
+			)
 
 		# Existing doc, from_date unchanged → approval path must not throw
 		too_old.flags.in_insert = False
@@ -142,19 +161,18 @@ def run():
 			except Exception as e:
 				approve_ok = False
 				err = str(e)
-			ok("Approval of older leave is not blocked by 72-hour window", approve_ok, err[:100])
+			ok("Approval of older leave is not blocked by creation window", approve_ok, err[:100])
 
-		# HR can still create older leave
 		with patch(
 			"valence.valence.doc_events.leave_application.frappe.get_roles",
 			return_value=["HR Manager"],
 		):
 			hr_ok = True
 			try:
-				validate_leave_creation_window(make_doc(add_days(getdate(), -10), add_days(getdate(), -10)))
+				validate_leave_creation_window(make_doc(add_days(getdate(), -14), add_days(getdate(), -14)))
 			except Exception:
 				hr_ok = False
-			ok("HR can override 72-hour window", hr_ok)
+			ok("HR can override creation window", hr_ok)
 
 	# Threshold helpers: 3 working days or more → Super HOD
 	past = add_days(getdate(), -5)
@@ -183,8 +201,8 @@ def run():
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
 	print(
-		"Rule: from_date more than 3 days / 72 hours in the past is blocked; "
-		"Super HOD for backdated leave when working days >= 3."
+		"Rule: from_date more than 3 working days in the past is blocked "
+		"(holidays/week offs excluded); Super HOD for backdated leave when working days >= 3."
 	)
 	if failed:
 		frappe.throw(f"72-hour leave tests failed ({failed})")

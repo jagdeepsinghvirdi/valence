@@ -3,9 +3,10 @@
 
 Uses standard HRMS Attendance Request (reason: Work From Home / On Duty).
 
-- Backdated OD/WFH is allowed only within the 72-hour creation window counted
-  from the request START date (Attendance Settings → Backdated Creation Window,
-  calendar days, default 3). This is a creation rule, not an approval deadline.
+- Backdated OD/WFH is allowed only within the creation window counted from
+  the request START date in working days (holidays + weekly offs excluded;
+  Attendance Settings → Backdated Creation Window, default 3).
+  This is a creation rule, not an approval deadline.
 - Every OD/WFH request requires HOD then Super HOD, including half-day,
   same-day, future, and backdated requests. Self-approval is blocked.
 - Reason / explanation is mandatory.

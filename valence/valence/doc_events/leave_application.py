@@ -58,7 +58,7 @@ def set_working_leave_days(doc, method=None):
 	- Holidays (Holiday List)
 	- Weekly offs (Holiday List weekly_off + Shift Assignment custom_off_day)
 
-	Backdated leave is allowed only within the 72-hour / creation-window rule
+	Backdated leave is allowed only within the working-day creation-window rule
 	(see validate_leave_creation_window). Super HOD uses this field when
 	from_date is before today AND working days >= Attendance Settings →
 	Super HOD After Working Days (configurable, default 3 = 3 days or more).
@@ -162,12 +162,12 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 
 def validate_leave_creation_window(doc, method=None):
 	"""
-	72-hour window (configurable as calendar days, default 3) on the leave /
-	request START date.
+	Creation window on the leave / request START date, counted in working days
+	(holidays + weekly offs excluded). Default 3.
 
-	Employees cannot apply Leave or OD/WFH if from_date is more than the window
-	in the past. Default 3 days = 72 hours. Approval has no time limit —
-	HOD / Super HOD can approve anytime. HR roles can override.
+	Employees cannot apply Leave or OD/WFH if more than this many working days
+	have passed since from_date. Approval has no time limit — HOD / Super HOD
+	can approve anytime. HR roles can override.
 	"""
 	if getattr(frappe.flags, "ignore_leave_creation_window", False):
 		return
@@ -192,22 +192,52 @@ def validate_leave_creation_window(doc, method=None):
 	if from_date >= today:
 		return
 
-	earliest = add_days(today, -window)
-	if from_date < earliest:
-		kind = _("leave") if doc.doctype == "Leave Application" else _("OD/WFH request")
-		hours = window * 24
-		frappe.throw(
-			_(
-				"{0} cannot be applied for a date more than {1} days ({2} hours) in the past. "
-				"Earliest allowed start date is {3}."
-			).format(
-				kind.capitalize(),
-				frappe.bold(window),
-				frappe.bold(hours),
-				formatdate(earliest),
-			),
-			title=_("72-Hour Window Exceeded"),
-		)
+	elapsed = _working_days_since_start(doc.employee, from_date, today)
+	if elapsed <= window:
+		return
+
+	earliest = _earliest_allowed_start(doc.employee, window, today)
+	kind = _("leave") if doc.doctype == "Leave Application" else _("OD/WFH request")
+	frappe.throw(
+		_(
+			"Backdated {0} can be created only within {1} working days of the start date "
+			"(holidays and weekly offs excluded). Earliest allowed start date is {2}."
+		).format(kind, frappe.bold(window), formatdate(earliest)),
+		title=_("Creation Window Exceeded"),
+	)
+
+
+def _working_days_since_start(employee, from_date, today) -> float:
+	"""Working days from start date through yesterday (how late the apply is)."""
+	yesterday = add_days(today, -1)
+	if getdate(from_date) > yesterday:
+		return 0.0
+	if not employee:
+		return float((yesterday - getdate(from_date)).days + 1)
+	return count_working_leave_days(employee, from_date, yesterday)
+
+
+def _earliest_allowed_start(employee, window, today):
+	"""Walk back from yesterday until `window` working days are collected."""
+	yesterday = add_days(today, -1)
+	if window <= 0:
+		return yesterday
+	if not employee:
+		return add_days(today, -window)
+
+	lookback_start = add_days(today, -90)
+	non_working = _get_non_working_dates(employee, lookback_start, yesterday)
+	found = 0
+	current = yesterday
+	earliest = yesterday
+	for _ in range(90):
+		if current not in non_working:
+			found += 1
+			earliest = current
+			if found >= window:
+				return earliest
+		current = add_days(current, -1)
+	return earliest
 
 
 

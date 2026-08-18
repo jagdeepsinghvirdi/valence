@@ -49,7 +49,7 @@
   },
   {
    "default": "3",
-   "description": "Calendar days from the leave/request START date. Employee can create backdated Leave or OD/WFH only if from_date is within this many days before today (default 3 days = 72 hours). Does not apply to approval — HOD / Super HOD can approve anytime. HR can override.",
+   "description": "Working days from the leave/request START date (holidays and weekly offs excluded). Employee can create backdated Leave or OD/WFH only if from_date is within this many working days before today. Does not apply to approval — HOD / Super HOD can approve anytime. HR can override. Default 3.",
    "fieldname": "leave_creation_window_days",
    "fieldtype": "Int",
    "label": "Backdated Creation Window (Days)",
@@ -106,7 +106,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-18 10:31:00.000000",
+ "modified": "2026-08-18 17:55:00.000000",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Attendance Settings",

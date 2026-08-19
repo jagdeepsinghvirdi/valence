@@ -1,8 +1,8 @@
 """
 E2E test for #7 OD/WFH workflow on Attendance Request.
 
-Aligned with leave: Super HOD only for backdated requests above the working-days threshold.
-Future / same-day OD/WFH is HOD-only regardless of length.
+Every OD/WFH request requires HOD then Super HOD — including same-day,
+half-day, future, and backdated requests.
 
   bench --site valence.localhost execute valence.valence.doc_events.test_od_wfh_workflow_e2e.run
 """
@@ -21,7 +21,6 @@ from valence.valence.setup.leave_workflow import (
 	STATE_PENDING_HOD,
 	STATE_PENDING_SUPER_HOD,
 	STATE_REJECTED,
-	get_super_hod_working_days_threshold,
 )
 from valence.valence.setup.od_wfh_workflow import (
 	WORKING_REQUEST_DAYS_FIELD,
@@ -34,7 +33,7 @@ HOD_USER = "e2e.hod@valence.test"
 SUPER_HOD_USER = "e2e.superhod@valence.test"
 
 FROM_OFFSET_DAYS = 20
-BACKDATED_LONG_OFFSET = -40
+BACKDATED_OFFSET = -2  # within 72-hour window so creation is allowed
 
 
 def run():
@@ -53,9 +52,6 @@ def run():
 		get_workflow_name("Attendance Request") == WORKFLOW_NAME,
 	)
 
-	threshold = get_super_hod_working_days_threshold()
-	ok("Threshold loaded", threshold >= 1, str(threshold))
-
 	actors = _ensure_test_actors()
 	ok("Test actors ready", all(actors.values()), str(actors))
 
@@ -65,171 +61,131 @@ def run():
 	created = []
 
 	try:
-		# Short WFH (1 working day) → HOD only
-		short = _new_request(
+		# Same-day WFH (tester case) → Super HOD required
+		same_day = _new_request(
 			employee,
 			company,
 			target_working_days=1,
 			reason="Work From Home",
-			description="E2E short WFH",
-			start_offset=FROM_OFFSET_DAYS,
+			description="E2E same-day WFH",
+			start_offset=0,
 		)
-		created.append(short.name)
+		created.append(same_day.name)
+		_apply_and_hod_approve(same_day.name)
+		same_day.reload()
 		ok(
-			"Short: working days ≤ threshold",
-			float(short.get(WORKING_REQUEST_DAYS_FIELD) or 0) <= threshold,
-			f"working={short.get(WORKING_REQUEST_DAYS_FIELD)} threshold={threshold}",
+			"Same-day WFH: HOD Approve → Pending Super HOD",
+			same_day.workflow_state == STATE_PENDING_SUPER_HOD and same_day.docstatus == 0,
+			same_day.workflow_state,
 		)
-
-		with _as_user(EMP_USER):
-			doc = frappe.get_doc("Attendance Request", short.name)
-			apply_workflow(doc, "Apply")
-
-		short.reload()
+		open_ok = True
+		open_err = ""
+		with _as_user(SUPER_HOD_USER):
+			try:
+				frappe.get_doc("Attendance Request", same_day.name)
+			except Exception as e:
+				open_ok = False
+				open_err = str(e)[:160]
+		ok("Super HOD can open same-day OD/WFH", open_ok, open_err)
+		with _as_user(SUPER_HOD_USER):
+			apply_workflow(frappe.get_doc("Attendance Request", same_day.name), "Approve")
+		same_day.reload()
 		ok(
-			"Short: Apply → Pending HOD",
-			short.workflow_state == STATE_PENDING_HOD and short.docstatus == 0,
-			f"state={short.workflow_state} working={short.get(WORKING_REQUEST_DAYS_FIELD)}",
+			"Same-day WFH: Super HOD Approve → Approved",
+			same_day.workflow_state == STATE_APPROVED and same_day.docstatus == 1,
+			same_day.workflow_state,
 		)
 
-		with _as_user(HOD_USER):
-			doc = frappe.get_doc("Attendance Request", short.name)
-			apply_workflow(doc, "Approve")
-
-		short.reload()
-		ok(
-			"Short: HOD Approve → submitted",
-			short.workflow_state == STATE_APPROVED and short.docstatus == 1,
-			f"state={short.workflow_state} docstatus={short.docstatus}",
-		)
-
-		attendance = frappe.db.exists(
-			"Attendance",
-			{"employee": employee, "attendance_request": short.name},
-		)
-		ok("Short: attendance record created", bool(attendance), attendance or "none")
-
-		# At-threshold OD (exactly threshold working days) → HOD only (≤ threshold)
-		at_thr = _new_request(
+		# Half-day style 1-day OD (tester case) still needs Super HOD after HOD
+		half = _new_request(
 			employee,
 			company,
-			target_working_days=threshold,
+			target_working_days=1,
 			reason="On Duty",
-			description="E2E at-threshold OD",
-			start_offset=FROM_OFFSET_DAYS + 8,
+			description="E2E half-day-style OD",
+			start_offset=FROM_OFFSET_DAYS,
+			half_day=1,
 		)
-		created.append(at_thr.name)
+		created.append(half.name)
+		_apply_and_hod_approve(half.name)
+		half.reload()
 		ok(
-			"At-threshold: working days == threshold",
-			float(at_thr.get(WORKING_REQUEST_DAYS_FIELD) or 0) == float(threshold),
-			f"working={at_thr.get(WORKING_REQUEST_DAYS_FIELD)}",
+			"Half-day OD: HOD Approve → Pending Super HOD",
+			half.workflow_state == STATE_PENDING_SUPER_HOD,
+			half.workflow_state,
 		)
-
-		with _as_user(EMP_USER):
-			doc = frappe.get_doc("Attendance Request", at_thr.name)
-			apply_workflow(doc, "Apply")
-		with _as_user(HOD_USER):
-			doc = frappe.get_doc("Attendance Request", at_thr.name)
-			apply_workflow(doc, "Approve")
-
-		at_thr.reload()
+		with _as_user(SUPER_HOD_USER):
+			apply_workflow(frappe.get_doc("Attendance Request", half.name), "Approve")
+		half.reload()
 		ok(
-			"At-threshold: HOD Approve → Approved (no Super HOD)",
-			at_thr.workflow_state == STATE_APPROVED and at_thr.docstatus == 1,
-			at_thr.workflow_state,
+			"Half-day OD: Super HOD Approve → Approved",
+			half.workflow_state == STATE_APPROVED,
+			half.workflow_state,
 		)
 
-		# Future long OD (working days > threshold) → HOD only
+		# Future multi-day OD → Super HOD still required
 		future_long = _new_request(
 			employee,
 			company,
-			target_working_days=threshold + 1,
+			target_working_days=4,
 			reason="On Duty",
 			description="E2E future long OD",
 			start_offset=FROM_OFFSET_DAYS + 20,
 		)
 		created.append(future_long.name)
-		ok(
-			"Future long: working days > threshold",
-			float(future_long.get(WORKING_REQUEST_DAYS_FIELD) or 0) > threshold,
-			f"working={future_long.get(WORKING_REQUEST_DAYS_FIELD)} threshold={threshold}",
-		)
-
-		with _as_user(EMP_USER):
-			doc = frappe.get_doc("Attendance Request", future_long.name)
-			apply_workflow(doc, "Apply")
-		with _as_user(HOD_USER):
-			doc = frappe.get_doc("Attendance Request", future_long.name)
-			apply_workflow(doc, "Approve")
-
+		_apply_and_hod_approve(future_long.name)
 		future_long.reload()
 		ok(
-			"Future long: HOD Approve → Approved (no Super HOD)",
+			"Future long: HOD Approve → Pending Super HOD",
+			future_long.workflow_state == STATE_PENDING_SUPER_HOD,
+			future_long.workflow_state,
+		)
+		with _as_user(SUPER_HOD_USER):
+			apply_workflow(frappe.get_doc("Attendance Request", future_long.name), "Approve")
+		future_long.reload()
+		ok(
+			"Future long: Super HOD Approve → Approved",
 			future_long.workflow_state == STATE_APPROVED and future_long.docstatus == 1,
 			future_long.workflow_state,
 		)
 
-		# Backdated long OD (working days > threshold) → Super HOD
-		long = _new_request(
+		# Backdated (within 72h window) → Super HOD + ToDo
+		backdated = _new_request(
 			employee,
 			company,
-			target_working_days=threshold + 1,
-			reason="On Duty",
-			description="E2E backdated long OD",
-			start_offset=BACKDATED_LONG_OFFSET,
+			target_working_days=1,
+			reason="Work From Home",
+			description="E2E backdated WFH",
+			start_offset=BACKDATED_OFFSET,
 		)
-		created.append(long.name)
+		created.append(backdated.name)
+		_apply_and_hod_approve(backdated.name)
+		backdated.reload()
 		ok(
-			"Long: working days > threshold",
-			float(long.get(WORKING_REQUEST_DAYS_FIELD) or 0) > threshold,
-			f"working={long.get(WORKING_REQUEST_DAYS_FIELD)} threshold={threshold}",
+			"Backdated WFH: HOD Approve → Pending Super HOD",
+			backdated.workflow_state == STATE_PENDING_SUPER_HOD,
+			backdated.workflow_state,
 		)
-
-		with _as_user(EMP_USER):
-			doc = frappe.get_doc("Attendance Request", long.name)
-			apply_workflow(doc, "Apply")
-
-		long.reload()
-		ok(
-			"Long: Apply → Pending HOD",
-			long.workflow_state == STATE_PENDING_HOD,
-			f"working={long.get(WORKING_REQUEST_DAYS_FIELD)}",
-		)
-
-		with _as_user(HOD_USER):
-			doc = frappe.get_doc("Attendance Request", long.name)
-			apply_workflow(doc, "Approve")
-
-		long.reload()
-		ok(
-			"Backdated long: HOD Approve → Pending Super HOD",
-			long.workflow_state == STATE_PENDING_SUPER_HOD and long.docstatus == 0,
-			long.workflow_state,
-		)
-
 		todos = frappe.get_all(
 			"ToDo",
 			filters={
 				"reference_type": "Attendance Request",
-				"reference_name": long.name,
+				"reference_name": backdated.name,
 				"status": "Open",
 			},
 			pluck="name",
 		)
-		ok("Backdated long: Super HOD ToDo created", len(todos) >= 1, str(todos[:3]))
-
+		ok("Backdated WFH: Super HOD ToDo created", len(todos) >= 1, str(todos[:3]))
 		with _as_user(SUPER_HOD_USER):
-			doc = frappe.get_doc("Attendance Request", long.name)
-			apply_workflow(doc, "Approve")
-
-		long.reload()
+			apply_workflow(frappe.get_doc("Attendance Request", backdated.name), "Approve")
+		backdated.reload()
 		ok(
-			"Backdated long: Super HOD Approve → submitted",
-			long.workflow_state == STATE_APPROVED and long.docstatus == 1,
-			f"state={long.workflow_state}",
+			"Backdated WFH: Super HOD Approve → Approved",
+			backdated.workflow_state == STATE_APPROVED,
+			backdated.workflow_state,
 		)
 
-		# Reject path
+		# Reject at HOD still works without Super HOD
 		rej = _new_request(
 			employee,
 			company,
@@ -239,15 +195,10 @@ def run():
 			start_offset=FROM_OFFSET_DAYS + 40,
 		)
 		created.append(rej.name)
-
 		with _as_user(EMP_USER):
-			doc = frappe.get_doc("Attendance Request", rej.name)
-			apply_workflow(doc, "Apply")
-
+			apply_workflow(frappe.get_doc("Attendance Request", rej.name), "Apply")
 		with _as_user(HOD_USER):
-			doc = frappe.get_doc("Attendance Request", rej.name)
-			apply_workflow(doc, "Reject")
-
+			apply_workflow(frappe.get_doc("Attendance Request", rej.name), "Reject")
 		rej.reload()
 		ok(
 			"Reject: stays draft, not submitted",
@@ -272,6 +223,13 @@ def run():
 	return {"passed": passed, "failed": failed}
 
 
+def _apply_and_hod_approve(name):
+	with _as_user(EMP_USER):
+		apply_workflow(frappe.get_doc("Attendance Request", name), "Apply")
+	with _as_user(HOD_USER):
+		apply_workflow(frappe.get_doc("Attendance Request", name), "Approve")
+
+
 @contextmanager
 def _as_user(user):
 	prev = frappe.session.user
@@ -283,53 +241,51 @@ def _as_user(user):
 
 
 def _ensure_test_actors():
-	"""Reuse E2E users from leave workflow tests."""
 	from valence.valence.doc_events.test_leave_workflow_e2e import _ensure_test_actors as ensure_leave_actors
 
 	return ensure_leave_actors()
 
 
-def _new_request(employee, company, target_working_days, reason, description, start_offset):
-	"""
-	Build an Attendance Request whose working-day count matches target_working_days.
-	Scans forward from start_offset until count_working_leave_days hits the target.
-	Clamps from_date to employee joining date (HRMS rejects earlier dates).
-	"""
+def _new_request(employee, company, target_working_days, reason, description, start_offset, half_day=0):
 	from_date = add_days(getdate(), start_offset)
 	joining = frappe.db.get_value("Employee", employee, "date_of_joining")
 	if joining and getdate(from_date) < getdate(joining):
 		from_date = getdate(joining)
+	from_date = _next_free_attendance_date(employee, from_date, forward=start_offset >= 0)
 	to_date = from_date
 	working = 0.0
-	# Cap scan so holidays/week offs don't loop forever
 	for _ in range(60):
 		working = count_working_leave_days(employee, from_date, to_date)
 		if working >= float(target_working_days):
 			break
 		to_date = add_days(to_date, 1)
 
-	doc = frappe.get_doc(
-		{
-			"doctype": "Attendance Request",
-			"employee": employee,
-			"company": company,
-			"from_date": from_date,
-			"to_date": to_date,
-			"reason": reason,
-			"explanation": description,
-			"include_holidays": 0,
-		}
-	)
+	payload = {
+		"doctype": "Attendance Request",
+		"employee": employee,
+		"company": company,
+		"from_date": from_date,
+		"to_date": to_date,
+		"reason": reason,
+		"explanation": description,
+		"include_holidays": 0,
+	}
+	if half_day and frappe.get_meta("Attendance Request").has_field("half_day"):
+		payload["half_day"] = 1
+		if frappe.get_meta("Attendance Request").has_field("half_day_date"):
+			payload["half_day_date"] = from_date
+
+	doc = frappe.get_doc(payload)
 	prev_window = getattr(frappe.flags, "ignore_leave_creation_window", False)
 	if getdate(from_date) < getdate():
 		frappe.flags.ignore_leave_creation_window = True
 	try:
+		_clear_attendance(employee, from_date, to_date)
 		doc.insert(ignore_permissions=True)
 	finally:
 		frappe.flags.ignore_leave_creation_window = prev_window
 	doc.reload()
 
-	# Force exact working days if holiday math drifted (e.g. half-day edge)
 	actual = float(doc.get(WORKING_REQUEST_DAYS_FIELD) or 0)
 	if actual != float(target_working_days):
 		frappe.db.set_value(
@@ -341,6 +297,45 @@ def _new_request(employee, company, target_working_days, reason, description, st
 		)
 		doc.reload()
 	return doc
+
+
+def _clear_attendance(employee, start, end):
+	names = frappe.get_all(
+		"Attendance",
+		filters={
+			"employee": employee,
+			"attendance_date": ["between", [start, end]],
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+	)
+	for name in names:
+		try:
+			doc = frappe.get_doc("Attendance", name)
+			if doc.docstatus == 1:
+				try:
+					doc.cancel()
+				except Exception:
+					frappe.db.set_value("Attendance", name, "docstatus", 2)
+			frappe.delete_doc("Attendance", name, force=1, ignore_permissions=True)
+		except Exception:
+			pass
+	frappe.db.commit()
+
+
+def _next_free_attendance_date(employee, start, forward=True):
+	"""Skip dates that already have Attendance so HRMS does not refuse the request."""
+	d = getdate(start)
+	step = 1 if forward else -1
+	for _ in range(60):
+		exists = frappe.db.exists(
+			"Attendance",
+			{"employee": employee, "attendance_date": d, "docstatus": ["<", 2]},
+		)
+		if not exists:
+			return d
+		d = add_days(d, step)
+	return getdate(start)
 
 
 def _purge_test_requests(employee):
@@ -358,7 +353,6 @@ def _cleanup_requests(names):
 			doc = frappe.get_doc("Attendance Request", name)
 			if doc.docstatus == 1:
 				doc.cancel()
-			# Clear ToDos referencing this request
 			for todo in frappe.get_all(
 				"ToDo",
 				filters={"reference_type": "Attendance Request", "reference_name": name},

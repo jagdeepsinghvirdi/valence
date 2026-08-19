@@ -49,7 +49,7 @@
   },
   {
    "default": "3",
-   "description": "Calendar days from the leave/request end date. Employee can create backdated Leave or OD/WFH only if to_date is within this many days before today. Does not apply to approval — HOD / Super HOD can approve anytime. HR can override. Default 3.",
+   "description": "Working days from the leave/request START date (holidays and weekly offs excluded). Employee can create backdated Leave or OD/WFH only if from_date is within this many working days before today. Does not apply to approval — HOD / Super HOD can approve anytime. HR can override. Default 3.",
    "fieldname": "leave_creation_window_days",
    "fieldtype": "Int",
    "label": "Backdated Creation Window (Days)",
@@ -58,7 +58,7 @@
   },
   {
    "default": "3",
-   "description": "Working days (holidays and week offs excluded). Applies only to backdated Leave and OD/WFH: up to this value needs only HOD; more also needs Super HOD. Future / same-day requests need only HOD regardless of length. Default 3.",
+   "description": "Working days (holidays and week offs excluded). Applies only to backdated Leave: this many working days or more also needs Super HOD. Below this value needs only HOD. Future / same-day leave needs only HOD regardless of length. All OD/WFH requests always need Super HOD. Default 3.",
    "fieldname": "super_hod_working_days_threshold",
    "fieldtype": "Int",
    "label": "Super HOD After Working Days",
@@ -106,7 +106,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-18 10:31:00.000000",
+ "modified": "2026-08-18 17:55:00.000000",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Attendance Settings",

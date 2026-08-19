@@ -1,16 +1,16 @@
 """
 #3 / #4 Leave Application approval routing (Track B)
 
-- Backdated leave is allowed only within Attendance Settings → Backdated Creation
-  Window (Days) counted from the leave end date (calendar days, default 3).
-  This is a creation rule, not approval.
+- Backdated leave is allowed only within Attendance Settings → Backdated
+  Creation Window (Days) counted from the leave START date in working days
+  (holidays + weekly offs excluded, default 3). This is a creation rule, not approval.
 - Future / same-day leave is HOD-only (no Super HOD), regardless of length.
 - Super HOD applies only to backdated leave (from_date before today).
 - Working leave days exclude holidays + week offs.
 - Super HOD threshold is configurable in Attendance Settings → Super HOD After
-  Working Days (default 3). HOD / Super HOD / HR can change it.
-- Backdated + working days ≤ threshold → HOD Approve → Approved
-- Backdated + working days > threshold → HOD Approve → Pending Super HOD → Super HOD Approve
+  Working Days (default 3). 3 working days or more need Super HOD.
+- Backdated + working days < threshold → HOD Approve → Approved
+- Backdated + working days >= threshold → HOD Approve → Pending Super HOD → Super HOD Approve
 """
 
 from __future__ import annotations
@@ -52,11 +52,11 @@ COND_NOT_BACKDATED = (
 )
 COND_SHORT = (
 	f"({COND_NOT_BACKDATED}) or "
-	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) <= {_THRESHOLD_EXPR})"
+	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) < {_THRESHOLD_EXPR})"
 )
 COND_LONG = (
 	f"({COND_BACKDATED}) and "
-	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) > {_THRESHOLD_EXPR})"
+	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) >= {_THRESHOLD_EXPR})"
 )
 
 
@@ -72,6 +72,7 @@ def ensure_leave_application_workflow():
 	_ensure_workflow_states()
 	_ensure_workflow_actions()
 	_ensure_super_hod_permissions()
+	_ensure_employee_field_ignores_user_permissions("Leave Application")
 	_ensure_workflow()
 	frappe.clear_cache()
 	frappe.db.commit()
@@ -83,7 +84,10 @@ def get_super_hod_working_days_threshold() -> int:
 
 
 def get_leave_creation_window_days() -> int:
-	"""Calendar-day window from end date for creating backdated Leave / OD / WFH. Default 3."""
+	"""Working-day window from start date for creating backdated Leave / OD / WFH.
+
+	Holidays and weekly offs are excluded. Default 3.
+	"""
 	return _positive_int_setting(CREATION_WINDOW_FIELD, DEFAULT_CREATION_WINDOW)
 
 
@@ -133,7 +137,7 @@ def _ensure_working_leave_days_field():
 			(
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Super HOD only for backdated leave above the threshold. "
+				"(default 3). Super HOD for backdated leave of 3 working days or more. "
 				"Future / same-day leave needs only HOD, regardless of length. "
 				"Backdated leave is allowed."
 			),
@@ -155,7 +159,7 @@ def _ensure_working_leave_days_field():
 			"description": (
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Super HOD only for backdated leave above the threshold. "
+				"(default 3). Super HOD for backdated leave of 3 working days or more. "
 				"Future / same-day leave needs only HOD, regardless of length. "
 				"Backdated leave is allowed."
 			),
@@ -185,12 +189,49 @@ def _ensure_super_hod_permissions():
 	):
 		add_permission("Leave Application", ROLE_SUPER_HOD, 0)
 
-	for prop in ("read", "write", "submit", "cancel", "email", "print", "share"):
+	for prop in ("read", "write", "submit", "cancel", "email", "print", "share", "select"):
 		try:
 			update_permission_property("Leave Application", ROLE_SUPER_HOD, 0, prop, 1)
 		except Exception:
 			# Property may already be set or type-restricted
 			pass
+
+
+def _ensure_employee_field_ignores_user_permissions(dt: str):
+	"""Stop Employee User Permissions from hiding Leave / OD / WFH from Super HOD.
+
+	Creating an Employee with 'Create User Permission' restricts that user to
+	their own Employee on every Link field. Super HOD then cannot open another
+	person's Leave Application even with role perms. Department-wise access is
+	already enforced by permission_query_conditions / has_permission.
+	"""
+	if not frappe.db.exists("DocType", dt):
+		return
+	if not frappe.get_meta(dt).has_field("employee"):
+		return
+
+	filters = {
+		"doc_type": dt,
+		"field_name": "employee",
+		"property": "ignore_user_permissions",
+	}
+	name = frappe.db.exists("Property Setter", filters)
+	if name:
+		frappe.db.set_value("Property Setter", name, "value", "1", update_modified=False)
+		return
+
+	frappe.get_doc(
+		{
+			"doctype": "Property Setter",
+			"doctype_or_field": "DocField",
+			"doc_type": dt,
+			"field_name": "employee",
+			"property": "ignore_user_permissions",
+			"property_type": "Check",
+			"value": "1",
+			"module": "Valence",
+		}
+	).insert(ignore_permissions=True)
 
 
 def _ensure_workflow_states():
@@ -265,7 +306,7 @@ def _ensure_workflow():
 			0,
 			ROLE_SUPER_HOD,
 			"Open",
-			"Awaiting Super HOD (backdated leave above Attendance Settings threshold)",
+			"Awaiting Super HOD (backdated leave of 3+ working days)",
 		),
 		_state_row(STATE_APPROVED, 1, "HR Manager", "Approved", "Leave approved"),
 		_state_row(STATE_REJECTED, 1, "HR Manager", "Rejected", "Leave rejected"),

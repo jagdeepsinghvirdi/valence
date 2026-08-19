@@ -170,6 +170,9 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
                     }
 
    # Shift Assignment weekly off check
+    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        return None
+
     shift_assignments = frappe.get_all(
         "Shift Assignment",
         filters={"employee": employee, "start_date": ["<=", date_obj]},
@@ -270,6 +273,8 @@ def get_offday_status(employee, attendance_date, attendance):
             return status
 
     # Step 2: Check Shift Assignment for weekly off
+    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        return None
 
     shift_assignment = frappe.get_all(
         "Shift Assignment",

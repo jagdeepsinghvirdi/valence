@@ -102,7 +102,8 @@ after_migrate = [
     "valence.valence.setup.leave_workflow.after_migrate",
     "valence.valence.setup.od_wfh_workflow.after_migrate",
     "valence.valence.monkey_patch.chemical_stock_entry.after_migrate",
-    "valence.valence.setup.short_leave_workflow.after_migrate",   
+    "valence.valence.setup.short_leave_workflow.after_migrate",
+    "valence.valence.doc_events.shift_assignment.after_migrate",
 ]
 
 # Uninstallation
@@ -140,10 +141,12 @@ after_migrate = [
 # #5 Department-wise Leave Access Control
 permission_query_conditions = {
 	"Leave Application": "valence.valence.override.query.leave_application_query",
+	"Attendance Request": "valence.valence.override.query.attendance_request_query",
 }
 
 has_permission = {
 	"Leave Application": "valence.valence.override.query.leave_application_has_permission",
+	"Attendance Request": "valence.valence.override.query.attendance_request_has_permission",
 }
 
 # DocType Class

@@ -2,7 +2,7 @@
 #3 / #4 Leave Application approval routing (Track B)
 
 - Backdated leave is allowed only within Attendance Settings → Backdated
-  Creation Window (Days) counted from the leave START date in working days
+  Creation Window (Days) counted after the leave END date in working days
   (holidays + weekly offs excluded, default 3). This is a creation rule, not approval.
 - Future / same-day leave is HOD-only (no Super HOD), regardless of length.
 - Super HOD applies only to backdated leave (from_date before today).
@@ -62,6 +62,8 @@ COND_LONG = (
 
 def after_migrate():
 	ensure_leave_application_workflow()
+	repair_historical_leave_workflow_states()
+	frappe.db.commit()
 
 
 def ensure_leave_application_workflow():
@@ -78,13 +80,46 @@ def ensure_leave_application_workflow():
 	frappe.db.commit()
 
 
+def repair_historical_leave_workflow_states():
+	"""Show old approved/rejected leaves as Approved/Rejected, not Draft.
+
+	HRMS `status` is the source of truth. List view uses `workflow_state`, which
+	can stay Draft when the workflow field was added (default Draft fills
+	existing rows; Frappe only backfills *empty* states). Does not change
+	docstatus or leave ledger.
+	"""
+	if not frappe.db.exists("DocType", "Leave Application"):
+		return
+	if "workflow_state" not in frappe.get_meta("Leave Application").get_valid_columns():
+		return
+
+	frappe.db.sql(
+		"""
+		UPDATE `tabLeave Application`
+		SET `workflow_state` = %s
+		WHERE `status` = 'Approved'
+		AND coalesce(`workflow_state`, '') IN ('Draft', '')
+		""",
+		(STATE_APPROVED,),
+	)
+	frappe.db.sql(
+		"""
+		UPDATE `tabLeave Application`
+		SET `workflow_state` = %s
+		WHERE `status` = 'Rejected'
+		AND coalesce(`workflow_state`, '') IN ('Draft', '')
+		""",
+		(STATE_REJECTED,),
+	)
+
+
 def get_super_hod_working_days_threshold() -> int:
 	"""Current configurable threshold (working days). Default 3."""
 	return _positive_int_setting(THRESHOLD_FIELD, DEFAULT_THRESHOLD)
 
 
 def get_leave_creation_window_days() -> int:
-	"""Working-day window from start date for creating backdated Leave / OD / WFH.
+	"""Working-day window after end date for creating backdated Leave / OD / WFH.
 
 	Holidays and weekly offs are excluded. Default 3.
 	"""

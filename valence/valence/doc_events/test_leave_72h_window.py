@@ -73,7 +73,7 @@ def run():
 			str(doc.get(WORKING_LEAVE_DAYS_FIELD)),
 		)
 
-	# Creation window = 3 working days from START date (offs excluded)
+	# Creation window = 3 working days AFTER end date (offs excluded)
 	with patch(
 		"valence.valence.doc_events.leave_application.frappe.get_roles",
 		return_value=["Employee"],
@@ -86,7 +86,7 @@ def run():
 		except Exception as e:
 			allowed = False
 			err = str(e)
-		ok("Create within 3 working days of start date is allowed", allowed, err[:100])
+		ok("Create within 3 working days after end date is allowed", allowed, err[:100])
 
 		today_doc = make_doc(getdate(), getdate())
 		today_ok = True
@@ -115,41 +115,73 @@ def run():
 		ok("Create 14 calendar days in the past is blocked", blocked, err[:160])
 
 		old_start = make_doc(add_days(getdate(), -14), add_days(getdate(), -1))
-		old_start_blocked = False
+		old_start_ok = True
 		err = ""
 		try:
 			validate_leave_creation_window(old_start)
 		except Exception as e:
-			old_start_blocked = True
+			old_start_ok = False
 			err = str(e)
 		ok(
-			"Start date older than 3 working days is blocked even if end date is recent",
-			old_start_blocked,
+			"Older start date is allowed when end date is still within the apply window",
+			old_start_ok,
 			err[:120],
 		)
 
-		# Holidays / week offs in the gap do not count, so start can be further back
+		# Client flow: leave 12–14, holiday 15, week off 16 → apply until 17, 18, 19
 		today = getdate()
-		offs = {add_days(today, -1), add_days(today, -2)}
-		holiday_start = make_doc(add_days(today, -5), add_days(today, -1))
+		offs = {add_days(today, -4), add_days(today, -3)}
+		client_leave = make_doc(add_days(today, -7), add_days(today, -5))
 		with patch(
 			"valence.valence.doc_events.leave_application._get_non_working_dates",
 			return_value=offs,
 		):
-			holiday_ok = True
+			client_ok = True
 			err = ""
 			try:
-				validate_leave_creation_window(holiday_start)
+				validate_leave_creation_window(client_leave)
 			except Exception as e:
-				holiday_ok = False
+				client_ok = False
 				err = str(e)
 			ok(
-				"Start further back is allowed when gap has week offs / holidays",
-				holiday_ok,
+				"Leave ending 5 days ago is allowed when next 2 days are holiday/week off",
+				client_ok,
 				err[:120],
 			)
 
-		# Existing doc, from_date unchanged → approval path must not throw
+			too_late = make_doc(add_days(today, -8), add_days(today, -6))
+			too_late_blocked = False
+			err = ""
+			try:
+				validate_leave_creation_window(too_late)
+			except Exception as e:
+				too_late_blocked = "Creation Window" in str(e) or "working days" in str(e).lower()
+				err = str(e)
+			ok(
+				"Leave ending 6 days ago is blocked (4th working day after end)",
+				too_late_blocked,
+				err[:160],
+			)
+
+		wfh = frappe.get_doc(
+			{
+				"doctype": "Attendance Request",
+				"employee": employee,
+				"from_date": add_days(getdate(), -14),
+				"to_date": add_days(getdate(), -14),
+				"reason": "Work From Home",
+			}
+		)
+		wfh_blocked = False
+		err = ""
+		try:
+			validate_leave_creation_window(wfh)
+		except Exception as e:
+			wfh_blocked = "Creation Window" in str(e) or "working days" in str(e).lower()
+			err = str(e)
+		ok("Backdated WFH uses the same end-date creation window", wfh_blocked, err[:160])
+
+		# Existing doc, dates unchanged → approval path must not throw
 		too_old.flags.in_insert = False
 		with patch.object(too_old, "is_new", return_value=False), patch.object(
 			too_old, "get_doc_before_save", return_value=too_old
@@ -201,7 +233,7 @@ def run():
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
 	print(
-		"Rule: from_date more than 3 working days in the past is blocked "
+		"Rule: to_date more than 3 working days in the past is blocked "
 		"(holidays/week offs excluded); Super HOD for backdated leave when working days >= 3."
 	)
 	if failed:

@@ -24,7 +24,60 @@ except ModuleNotFoundError:
 
 
 class StockEntry(_StockEntry):
+	def _uses_consumption_entry_cost(self) -> bool:
+		"""True when Manufacture FG cost must come from submitted consumption entries."""
+		if self.purpose != "Manufacture" or cint(self.is_return) or not self.work_order:
+			return False
+		if not cint(frappe.db.get_single_value("Manufacturing Settings", "material_consumption")):
+			return False
+		if not cint(
+			frappe.db.get_single_value("Manufacturing Settings", "get_rm_cost_from_consumption_entry")
+		):
+			return False
+		if hasattr(self, "get_consumption_entries"):
+			return bool(self.get_consumption_entries())
+		return bool(
+			frappe.db.exists(
+				"Stock Entry",
+				{
+					"docstatus": 1,
+					"work_order": self.work_order,
+					"purpose": "Material Consumption for Manufacture",
+				},
+			)
+		)
+
+	def _drop_raw_materials_for_consumption_costing(self) -> None:
+		"""Keep Finish/Manufacture as FG-only so users need not toggle Manufacturing Settings."""
+		if not self._uses_consumption_entry_cost():
+			return
+		for row in list(self.get("items") or []):
+			if not cint(row.is_finished_item) and not cint(row.is_scrap_item):
+				self.remove(row)
+
+	def get_items(self):
+		super().get_items()
+		self._drop_raw_materials_for_consumption_costing()
+
+	def validate(self):
+		self._drop_raw_materials_for_consumption_costing()
+		super().validate()
+
+	def get_basic_rate_for_manufactured_item(
+		self, finished_item_qty, outgoing_items_cost=0, has_consumption_basis=False
+	):
+		self._drop_raw_materials_for_consumption_costing()
+		parent = super().get_basic_rate_for_manufactured_item
+		try:
+			return parent(finished_item_qty, outgoing_items_cost, has_consumption_basis)
+		except TypeError:
+			return parent(finished_item_qty, outgoing_items_cost)
+
 	def add_transfered_raw_materials_in_items(self) -> None:
+		# Consumption already booked RM; Finish must not backflush them again.
+		if self._uses_consumption_entry_cost():
+			return
+
 		available_materials = get_available_materials(self.work_order)
 
 		wo_data = frappe.db.get_value(

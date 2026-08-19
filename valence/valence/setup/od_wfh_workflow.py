@@ -3,8 +3,8 @@
 
 Uses standard HRMS Attendance Request (reason: Work From Home / On Duty).
 
-- Backdated OD/WFH is allowed only within the creation window counted from
-  the request START date in working days (holidays + weekly offs excluded;
+- Backdated OD/WFH is allowed only within the creation window counted after
+  the request END date in working days (holidays + weekly offs excluded;
   Attendance Settings → Backdated Creation Window, default 3).
   This is a creation rule, not an approval deadline.
 - Every OD/WFH request requires HOD then Super HOD, including half-day,
@@ -40,6 +40,8 @@ WORKING_REQUEST_DAYS_FIELD = "custom_working_request_days"
 
 def after_migrate():
 	ensure_od_wfh_workflow()
+	repair_historical_od_wfh_workflow_states()
+	frappe.db.commit()
 
 
 def ensure_od_wfh_workflow():
@@ -56,6 +58,24 @@ def ensure_od_wfh_workflow():
 	frappe.db.commit()
 
 
+def repair_historical_od_wfh_workflow_states():
+	"""Submitted OD/WFH that still show Draft after the workflow field was added."""
+	if not frappe.db.exists("DocType", DOCTYPE):
+		return
+	if "workflow_state" not in frappe.get_meta(DOCTYPE).get_valid_columns():
+		return
+
+	frappe.db.sql(
+		"""
+		UPDATE `tabAttendance Request`
+		SET `workflow_state` = %s
+		WHERE `docstatus` = 1
+		AND coalesce(`workflow_state`, '') IN ('Draft', '')
+		""",
+		(STATE_APPROVED,),
+	)
+
+
 def _ensure_custom_fields():
 	"""Workflow field + working-day count for Super HOD routing."""
 	fields = [
@@ -66,7 +86,6 @@ def _ensure_custom_fields():
 			"fieldtype": "Link",
 			"options": "Workflow State",
 			"insert_after": "employee_name",
-			"default": STATE_DRAFT,
 			"read_only": 1,
 			"no_copy": 1,
 			"allow_on_submit": 1,

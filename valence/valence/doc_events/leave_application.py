@@ -162,12 +162,12 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 
 def validate_leave_creation_window(doc, method=None):
 	"""
-	Creation window on the leave / request START date, counted in working days
+	Creation window after the leave / request END date, counted in working days
 	(holidays + weekly offs excluded). Default 3.
 
-	Employees cannot apply Leave or OD/WFH if more than this many working days
-	have passed since from_date. Approval has no time limit — HOD / Super HOD
-	can approve anytime. HR roles can override.
+	Employees can apply backdated Leave or OD/WFH until this many working days
+	have passed after to_date. Applying on or before to_date is always allowed.
+	Approval has no time limit — HOD / Super HOD can approve anytime. HR can override.
 	"""
 	if getattr(frappe.flags, "ignore_leave_creation_window", False):
 		return
@@ -175,69 +175,77 @@ def validate_leave_creation_window(doc, method=None):
 	if _is_hr_user():
 		return
 
-	if not doc.from_date:
+	end_date = doc.to_date or doc.from_date
+	if not end_date:
 		return
 
-	# Approval and other updates: skip if start date did not change
+	# Approval and other updates: skip if the period did not change
 	if not doc.is_new():
 		before = doc.get_doc_before_save()
-		if before and before.from_date and getdate(before.from_date) == getdate(doc.from_date):
-			return
+		if before:
+			before_end = before.to_date or before.from_date
+			if (
+				before.from_date
+				and before_end
+				and getdate(before.from_date) == getdate(doc.from_date)
+				and getdate(before_end) == getdate(end_date)
+			):
+				return
 
 	from valence.valence.setup.leave_workflow import get_leave_creation_window_days
 
 	window = get_leave_creation_window_days()
-	from_date = getdate(doc.from_date)
+	end_date = getdate(end_date)
 	today = getdate()
-	if from_date >= today:
+	if end_date >= today:
 		return
 
-	elapsed = _working_days_since_start(doc.employee, from_date, today)
+	elapsed = _working_days_after_end(doc.employee, end_date, today)
 	if elapsed <= window:
 		return
 
-	earliest = _earliest_allowed_start(doc.employee, window, today)
+	deadline = _last_apply_date(doc.employee, end_date, window)
 	kind = _("leave") if doc.doctype == "Leave Application" else _("OD/WFH request")
 	frappe.throw(
 		_(
-			"Backdated {0} can be created only within {1} working days of the start date "
-			"(holidays and weekly offs excluded). Earliest allowed start date is {2}."
-		).format(kind, frappe.bold(window), formatdate(earliest)),
+			"Backdated {0} can be created only within {1} working days after the end date "
+			"(holidays and weekly offs excluded). Last date to apply for this period was {2}."
+		).format(kind, frappe.bold(window), formatdate(deadline)),
 		title=_("Creation Window Exceeded"),
 	)
 
 
-def _working_days_since_start(employee, from_date, today) -> float:
-	"""Working days from start date through yesterday (how late the apply is)."""
-	yesterday = add_days(today, -1)
-	if getdate(from_date) > yesterday:
+def _working_days_after_end(employee, to_date, today) -> float:
+	"""Working days strictly after to_date through today (inclusive)."""
+	start = add_days(getdate(to_date), 1)
+	if start > getdate(today):
 		return 0.0
 	if not employee:
-		return float((yesterday - getdate(from_date)).days + 1)
-	return count_working_leave_days(employee, from_date, yesterday)
+		return float((getdate(today) - start).days + 1)
+	return count_working_leave_days(employee, start, today)
 
 
-def _earliest_allowed_start(employee, window, today):
-	"""Walk back from yesterday until `window` working days are collected."""
-	yesterday = add_days(today, -1)
+def _last_apply_date(employee, to_date, window):
+	"""Nth working day after to_date (holidays and weekly offs skipped)."""
+	start = add_days(getdate(to_date), 1)
 	if window <= 0:
-		return yesterday
+		return start
 	if not employee:
-		return add_days(today, -window)
+		return add_days(start, window - 1)
 
-	lookback_start = add_days(today, -90)
-	non_working = _get_non_working_dates(employee, lookback_start, yesterday)
+	horizon = add_days(start, 90)
+	non_working = _get_non_working_dates(employee, start, horizon)
 	found = 0
-	current = yesterday
-	earliest = yesterday
+	current = start
+	last = start
 	for _ in range(90):
 		if current not in non_working:
 			found += 1
-			earliest = current
+			last = current
 			if found >= window:
-				return earliest
-		current = add_days(current, -1)
-	return earliest
+				return last
+		current = add_days(current, 1)
+	return last
 
 
 

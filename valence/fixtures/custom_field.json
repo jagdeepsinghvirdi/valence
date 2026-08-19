@@ -1376,7 +1376,7 @@
   "columns": 0,
   "default": null,
   "depends_on": null,
-  "description": "Working days in leave period excluding holidays and week offs. Compared to Attendance Settings \u2192 Super HOD After Working Days (default 3). Super HOD for backdated leave of 3 working days or more. Future / same-day leave needs only HOD, regardless of length. Backdated leave is allowed within the working-day window after the end date.",
+  "description": "Working days in leave period excluding holidays and week offs. Compared to Attendance Settings \u2192 Super HOD After Working Days (default 3). Super HOD for backdated leave of 3 working days or more. Future / same-day leave needs only HOD, regardless of length. Backdated leave is allowed within the working-day window from the start date and after the end date.",
   "docstatus": 0,
   "doctype": "Custom Field",
   "dt": "Leave Application",

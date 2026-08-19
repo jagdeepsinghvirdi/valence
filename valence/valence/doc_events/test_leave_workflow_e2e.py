@@ -98,7 +98,7 @@ def run():
 			f"state={short.workflow_state} status={short.status} docstatus={short.docstatus}",
 		)
 
-		# ------ FUTURE LONG LEAVE: HOD only (no Super HOD) ------
+		# ------ FUTURE LONG LEAVE: HOD then Super HOD ------
 		future_long = _new_leave(
 			actors["employee"]["employee"],
 			leave_type,
@@ -115,7 +115,17 @@ def run():
 
 		future_long.reload()
 		ok(
-			"Future long: HOD Approve → Approved (no Super HOD)",
+			"Future long: HOD Approve → Pending Super HOD",
+			future_long.workflow_state == STATE_PENDING_SUPER_HOD and future_long.docstatus == 0,
+			f"state={future_long.workflow_state} status={future_long.status}",
+		)
+
+		with _as_user(SUPER_HOD_USER):
+			apply_workflow(frappe.get_doc("Leave Application", future_long.name), "Approve")
+
+		future_long.reload()
+		ok(
+			"Future long: Super HOD Approve → Approved",
 			future_long.workflow_state == STATE_APPROVED
 			and future_long.status == "Approved"
 			and future_long.docstatus == 1,
@@ -568,7 +578,7 @@ def _new_leave(employee, leave_type, days, description, start_offset=None):
 	"""Create leave draft; force custom_working_leave_days for workflow routing tests.
 
 	`days` here means intended working-day count for Super HOD threshold tests
-	(backdated + above threshold → Super HOD; future / ≤ threshold → HOD only).
+	(working days at or above threshold → Super HOD; below threshold → HOD only).
 	"""
 	if start_offset is None:
 		start_offset = FROM_OFFSET_DAYS

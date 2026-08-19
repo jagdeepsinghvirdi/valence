@@ -1,8 +1,8 @@
 """
 E2E test for #7 OD/WFH workflow on Attendance Request.
 
-Every OD/WFH request requires HOD then Super HOD — including same-day,
-half-day, future, and backdated requests.
+Every OD/WFH request: HOD then Super HOD only when working days >= threshold
+(same as Leave). Below threshold, HOD approval is enough.
 
   bench --site valence.localhost execute valence.valence.doc_events.test_od_wfh_workflow_e2e.run
 """
@@ -61,7 +61,7 @@ def run():
 	created = []
 
 	try:
-		# Same-day WFH (tester case) → Super HOD required
+		# Same-day 1-day WFH → HOD only (below threshold)
 		same_day = _new_request(
 			employee,
 			company,
@@ -74,29 +74,12 @@ def run():
 		_apply_and_hod_approve(same_day.name)
 		same_day.reload()
 		ok(
-			"Same-day WFH: HOD Approve → Pending Super HOD",
-			same_day.workflow_state == STATE_PENDING_SUPER_HOD and same_day.docstatus == 0,
-			same_day.workflow_state,
-		)
-		open_ok = True
-		open_err = ""
-		with _as_user(SUPER_HOD_USER):
-			try:
-				frappe.get_doc("Attendance Request", same_day.name)
-			except Exception as e:
-				open_ok = False
-				open_err = str(e)[:160]
-		ok("Super HOD can open same-day OD/WFH", open_ok, open_err)
-		with _as_user(SUPER_HOD_USER):
-			apply_workflow(frappe.get_doc("Attendance Request", same_day.name), "Approve")
-		same_day.reload()
-		ok(
-			"Same-day WFH: Super HOD Approve → Approved",
+			"Same-day WFH: HOD Approve → Approved (no Super HOD)",
 			same_day.workflow_state == STATE_APPROVED and same_day.docstatus == 1,
 			same_day.workflow_state,
 		)
 
-		# Half-day style 1-day OD (tester case) still needs Super HOD after HOD
+		# Half-day style 1-day OD → HOD only
 		half = _new_request(
 			employee,
 			company,
@@ -110,20 +93,12 @@ def run():
 		_apply_and_hod_approve(half.name)
 		half.reload()
 		ok(
-			"Half-day OD: HOD Approve → Pending Super HOD",
-			half.workflow_state == STATE_PENDING_SUPER_HOD,
-			half.workflow_state,
-		)
-		with _as_user(SUPER_HOD_USER):
-			apply_workflow(frappe.get_doc("Attendance Request", half.name), "Approve")
-		half.reload()
-		ok(
-			"Half-day OD: Super HOD Approve → Approved",
+			"Half-day OD: HOD Approve → Approved (no Super HOD)",
 			half.workflow_state == STATE_APPROVED,
 			half.workflow_state,
 		)
 
-		# Future multi-day OD → Super HOD still required
+		# Future multi-day OD → Super HOD
 		future_long = _new_request(
 			employee,
 			company,
@@ -140,6 +115,15 @@ def run():
 			future_long.workflow_state == STATE_PENDING_SUPER_HOD,
 			future_long.workflow_state,
 		)
+		open_ok = True
+		open_err = ""
+		with _as_user(SUPER_HOD_USER):
+			try:
+				frappe.get_doc("Attendance Request", future_long.name)
+			except Exception as e:
+				open_ok = False
+				open_err = str(e)[:160]
+		ok("Super HOD can open long OD/WFH", open_ok, open_err)
 		with _as_user(SUPER_HOD_USER):
 			apply_workflow(frappe.get_doc("Attendance Request", future_long.name), "Approve")
 		future_long.reload()
@@ -149,11 +133,11 @@ def run():
 			future_long.workflow_state,
 		)
 
-		# Backdated (within 72h window) → Super HOD + ToDo
+		# Backdated 4 working days → Super HOD + ToDo
 		backdated = _new_request(
 			employee,
 			company,
-			target_working_days=1,
+			target_working_days=4,
 			reason="Work From Home",
 			description="E2E backdated WFH",
 			start_offset=BACKDATED_OFFSET,

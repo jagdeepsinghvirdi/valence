@@ -3,13 +3,14 @@
 
 Uses standard HRMS Attendance Request (reason: Work From Home / On Duty).
 
-- Backdated OD/WFH is allowed only within the creation window counted from
-  the request START date and after the request END date in working days
+- Backdated OD/WFH is allowed only within the creation window counted after
+  the request END date in working days
   (holidays + weekly offs excluded;
   Attendance Settings → Backdated Creation Window, default 3).
   This is a creation rule, not an approval deadline.
-- Every OD/WFH request requires HOD then Super HOD, including half-day,
-  same-day, future, and backdated requests. Self-approval is blocked.
+- Super HOD applies when working days are at or above Attendance Settings →
+  Super HOD After Working Days (default 3), same as Leave — future, same-day,
+  and backdated. Below the threshold, HOD approval is enough.
 - Reason / explanation is mandatory.
 """
 
@@ -24,6 +25,7 @@ from valence.valence.setup.leave_workflow import (
 	STATE_PENDING_HOD,
 	STATE_PENDING_SUPER_HOD,
 	STATE_REJECTED,
+	_THRESHOLD_EXPR,
 	_ensure_employee_field_ignores_user_permissions,
 	_ensure_roles,
 	_ensure_threshold_setting,
@@ -35,8 +37,9 @@ from valence.valence.setup.leave_workflow import (
 WORKFLOW_NAME = "OD WFH Request Approval"
 DOCTYPE = "Attendance Request"
 
-# Working days kept for display / reporting (no longer used for Super HOD routing)
 WORKING_REQUEST_DAYS_FIELD = "custom_working_request_days"
+COND_SHORT = f"float(doc.{WORKING_REQUEST_DAYS_FIELD} or 0) < {_THRESHOLD_EXPR}"
+COND_LONG = f"float(doc.{WORKING_REQUEST_DAYS_FIELD} or 0) >= {_THRESHOLD_EXPR}"
 
 
 def after_migrate():
@@ -112,7 +115,9 @@ def _ensure_custom_fields():
 			"read_only": 1,
 			"description": (
 				"Working days in OD/WFH period excluding holidays and week offs. "
-				"Informational — every OD/WFH request still requires HOD then Super HOD."
+				"Compared to Attendance Settings → Super HOD After Working Days "
+				"(default 3). This many working days or more also needs Super HOD, "
+				"including future and same-day requests. Below this value needs only HOD."
 			),
 		},
 	]
@@ -179,7 +184,7 @@ def _ensure_workflow():
 			STATE_PENDING_SUPER_HOD,
 			0,
 			ROLE_SUPER_HOD,
-			"Awaiting Super HOD (required for every OD/WFH request)",
+			"Awaiting Super HOD (OD/WFH of 3+ working days)",
 		),
 		_ar_state_row(STATE_APPROVED, 1, "HR Manager", "OD/WFH approved"),
 		_ar_state_row(STATE_REJECTED, 0, "HR Manager", "OD/WFH rejected"),
@@ -197,8 +202,19 @@ def _ensure_workflow():
 			_transition(
 				STATE_PENDING_HOD,
 				"Approve",
+				STATE_APPROVED,
+				role,
+				condition=COND_SHORT,
+				allow_self_approval=0,
+			)
+		)
+		transitions.append(
+			_transition(
+				STATE_PENDING_HOD,
+				"Approve",
 				STATE_PENDING_SUPER_HOD,
 				role,
+				condition=COND_LONG,
 				allow_self_approval=0,
 			)
 		)

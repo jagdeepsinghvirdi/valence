@@ -16,6 +16,10 @@ from hrms.hr.doctype.leave_application.leave_application import (
 
 
 class LeaveApplication(HRMSLeaveApplication):
+	def validate(self):
+		apply_mariadb_leave_sql_patches()
+		super().validate()
+
 	def validate_leave_overlap(self):
 		if not self.name:
 			self.name = "New Leave Application"
@@ -55,20 +59,20 @@ class LeaveApplication(HRMSLeaveApplication):
 
 
 def get_leave_entries(employee, leave_type, from_date, to_date):
-	"""MariaDB-12-safe version of HRMS get_leave_entries (backtick `to_date`)."""
+	"""MariaDB-12-safe version of HRMS get_leave_entries (backtick reserved names)."""
 	return frappe.db.sql(
 		"""
 		SELECT
-			employee, leave_type, from_date, `to_date`, leaves, transaction_name, transaction_type, holiday_list,
+			employee, leave_type, `from_date`, `to_date`, `leaves`, transaction_name, transaction_type, holiday_list,
 			is_carry_forward, is_expired
 		FROM `tabLeave Ledger Entry`
 		WHERE employee=%(employee)s AND leave_type=%(leave_type)s
 			AND docstatus=1
-			AND (leaves<0
+			AND (`leaves`<0
 				OR is_expired=1)
-			AND (from_date between %(from_date)s AND %(to_date)s
+			AND (`from_date` between %(from_date)s AND %(to_date)s
 				OR `to_date` between %(from_date)s AND %(to_date)s
-				OR (from_date < %(from_date)s AND `to_date` > %(to_date)s))
+				OR (`from_date` < %(from_date)s AND `to_date` > %(to_date)s))
 		""",
 		{"from_date": from_date, "to_date": to_date, "employee": employee, "leave_type": leave_type},
 		as_dict=1,
@@ -80,12 +84,12 @@ def get_leave_period(from_date, to_date, company):
 	"""MariaDB-12-safe version of hrms.hr.utils.get_leave_period (backtick `to_date`)."""
 	leave_period = frappe.db.sql(
 		"""
-		select name, from_date, `to_date`
+		select name, `from_date`, `to_date`
 		from `tabLeave Period`
 		where company=%(company)s and is_active=1
-			and (from_date between %(from_date)s and %(to_date)s
+			and (`from_date` between %(from_date)s and %(to_date)s
 				or `to_date` between %(from_date)s and %(to_date)s
-				or (from_date < %(from_date)s and `to_date` > %(to_date)s))
+				or (`from_date` < %(from_date)s and `to_date` > %(to_date)s))
 		""",
 		{"from_date": from_date, "to_date": to_date, "company": company},
 		as_dict=1,
@@ -96,13 +100,24 @@ def get_leave_period(from_date, to_date, company):
 
 
 def apply_mariadb_leave_sql_patches():
-	"""Patch HRMS module-level helpers used outside the DocType class."""
-	import hrms.hr.doctype.leave_application.leave_application as leave_mod
-	import hrms.hr.utils as hr_utils
+	"""Patch HRMS module-level helpers used outside the DocType class.
+
+	Must run per-request: hooks.py import-time patch can be lost when HRMS
+	reloads, and validate_balance_leaves always calls the module function.
+	"""
+	try:
+		import hrms.hr.doctype.leave_application.leave_application as leave_mod
+		import hrms.hr.utils as hr_utils
+	except ImportError:
+		return
+
+	if getattr(leave_mod.get_leave_entries, "__name__", "") == "get_leave_entries" and getattr(
+		leave_mod.get_leave_entries, "__module__", ""
+	) == __name__:
+		return
 
 	leave_mod.get_leave_entries = get_leave_entries
 	hr_utils.get_leave_period = get_leave_period
-	# Rebind modules that already did `from hrms.hr.utils import get_leave_period`.
 	leave_mod.get_leave_period = get_leave_period
 	for module_path in (
 		"hrms.hr.doctype.leave_allocation.leave_allocation",

@@ -60,9 +60,8 @@ def set_working_leave_days(doc, method=None):
 
 	Backdated leave is allowed only within the working-day creation-window rule
 	(see validate_leave_creation_window). Super HOD uses this field when
-	from_date is before today AND working days >= Attendance Settings →
-	Super HOD After Working Days (configurable, default 3 = 3 days or more).
-	Future / same-day leave is HOD-only.
+	working days >= Attendance Settings → Super HOD After Working Days
+	(configurable, default 3), for future, same-day, and backdated leave.
 	"""
 	if not doc.meta.has_field(WORKING_LEAVE_DAYS_FIELD):
 		return
@@ -162,12 +161,12 @@ def _get_shift_weekly_off_weekday(employee, start, end):
 
 def validate_leave_creation_window(doc, method=None):
 	"""
-	Creation window on the leave / request START date, counted in working days
+	Creation window after the leave / request END date, counted in working days
 	(holidays + weekly offs excluded). Default 3.
 
-	Employees cannot apply Leave or OD/WFH if more than this many working days
-	have passed since from_date. Approval has no time limit — HOD / Super HOD
-	can approve anytime. HR roles can override.
+	Employees can apply backdated Leave or OD/WFH until this many working days
+	have passed after to_date. Applying on or before to_date is always allowed.
+	Approval has no time limit — HOD / Super HOD can approve anytime. HR can override.
 	"""
 	if getattr(frappe.flags, "ignore_leave_creation_window", False):
 		return
@@ -175,82 +174,88 @@ def validate_leave_creation_window(doc, method=None):
 	if _is_hr_user():
 		return
 
-	if not doc.from_date:
+	end_date = doc.to_date or doc.from_date
+	if not end_date:
 		return
 
-	# Approval and other updates: skip if start date did not change
+	# Approval and other updates: skip if the period did not change
 	if not doc.is_new():
 		before = doc.get_doc_before_save()
-		if before and before.from_date and getdate(before.from_date) == getdate(doc.from_date):
-			return
+		if before:
+			before_end = before.to_date or before.from_date
+			if (
+				before.from_date
+				and before_end
+				and getdate(before.from_date) == getdate(doc.from_date)
+				and getdate(before_end) == getdate(end_date)
+			):
+				return
 
 	from valence.valence.setup.leave_workflow import get_leave_creation_window_days
 
 	window = get_leave_creation_window_days()
-	from_date = getdate(doc.from_date)
+	end_date = getdate(end_date)
 	today = getdate()
-	if from_date >= today:
+	if end_date >= today:
 		return
 
-	elapsed = _working_days_since_start(doc.employee, from_date, today)
+	elapsed = _working_days_after_end(doc.employee, end_date, today)
 	if elapsed <= window:
 		return
 
-	earliest = _earliest_allowed_start(doc.employee, window, today)
+	deadline = _last_apply_date(doc.employee, end_date, window)
 	kind = _("leave") if doc.doctype == "Leave Application" else _("OD/WFH request")
 	frappe.throw(
 		_(
-			"Backdated {0} can be created only within {1} working days of the start date "
-			"(holidays and weekly offs excluded). Earliest allowed start date is {2}."
-		).format(kind, frappe.bold(window), formatdate(earliest)),
+			"Backdated {0} can be created only within {1} working days after the end date "
+			"(holidays and weekly offs excluded). Last date to apply for this period was {2}."
+		).format(kind, frappe.bold(window), formatdate(deadline)),
 		title=_("Creation Window Exceeded"),
 	)
 
 
-def _working_days_since_start(employee, from_date, today) -> float:
-	"""Working days from start date through yesterday (how late the apply is)."""
-	yesterday = add_days(today, -1)
-	if getdate(from_date) > yesterday:
+def _working_days_after_end(employee, to_date, today) -> float:
+	"""Working days strictly after to_date through today (inclusive)."""
+	start = add_days(getdate(to_date), 1)
+	if start > getdate(today):
 		return 0.0
 	if not employee:
-		return float((yesterday - getdate(from_date)).days + 1)
-	return count_working_leave_days(employee, from_date, yesterday)
+		return float((getdate(today) - start).days + 1)
+	return count_working_leave_days(employee, start, today)
 
 
-def _earliest_allowed_start(employee, window, today):
-	"""Walk back from yesterday until `window` working days are collected."""
-	yesterday = add_days(today, -1)
+def _last_apply_date(employee, to_date, window):
+	"""Nth working day after to_date (holidays and weekly offs skipped)."""
+	start = add_days(getdate(to_date), 1)
 	if window <= 0:
-		return yesterday
+		return start
 	if not employee:
-		return add_days(today, -window)
+		return add_days(start, window - 1)
 
-	lookback_start = add_days(today, -90)
-	non_working = _get_non_working_dates(employee, lookback_start, yesterday)
+	horizon = add_days(start, 90)
+	non_working = _get_non_working_dates(employee, start, horizon)
 	found = 0
-	current = yesterday
-	earliest = yesterday
+	current = start
+	last = start
 	for _ in range(90):
 		if current not in non_working:
 			found += 1
-			earliest = current
+			last = current
 			if found >= window:
-				return earliest
-		current = add_days(current, -1)
-	return earliest
+				return last
+		current = add_days(current, 1)
+	return last
 
 
 
 def needs_super_hod_approval(working_days, from_date=None) -> bool:
-	"""True for backdated requests whose working days are at or above the threshold.
+	"""True when working days are at or above the Super HOD threshold.
 
-	3 working days or more (default) need Super HOD. Future / same-day leave is
-	HOD-only. If from_date is omitted, only the working-day threshold is applied.
+	Applies to future, same-day, and backdated leave. `from_date` is unused
+	(kept so existing callers do not break).
 	"""
 	from valence.valence.setup.leave_workflow import get_super_hod_working_days_threshold
 
-	if from_date is not None and getdate(from_date) >= getdate():
-		return False
 	return flt(working_days) >= get_super_hod_working_days_threshold()
 
 
@@ -298,11 +303,64 @@ def validate_no_leave_on_present_day(doc, method=None):
 ALLOWED_RESIGNED_LEAVE_TYPES = frozenset({"Leave Without Pay", "Sick Leave"})
 
 
+def employee_in_resign_period(employee) -> bool:
+	"""True if employee has resigned, is serving notice, or is already relieved."""
+	if not employee:
+		return False
+	fields = ["status", "relieving_date"]
+	meta = frappe.get_meta("Employee")
+	if meta.has_field("resignation_letter_date"):
+		fields.append("resignation_letter_date")
+	emp = frappe.db.get_value("Employee", employee, fields, as_dict=True)
+	if not emp:
+		return False
+	if emp.status == "Left":
+		return True
+	if emp.get("relieving_date"):
+		return True
+	resignation = emp.get("resignation_letter_date")
+	if resignation and getdate(resignation) <= getdate():
+		return True
+	return False
+
+
+def resigned_leave_types_allowed() -> list:
+	"""Leave Type names that exist and are allowed during resign/notice period."""
+	return frappe.get_all(
+		"Leave Type",
+		filters={"name": ["in", list(ALLOWED_RESIGNED_LEAVE_TYPES)]},
+		pluck="name",
+	)
+
+
+@frappe.whitelist()
+def get_leave_type_filter_for_employee(employee):
+	"""None = no extra filter. List = only these leave types in the dropdown."""
+	if not employee or _is_hr_user():
+		return None
+	if not employee_in_resign_period(employee):
+		return None
+	return resigned_leave_types_allowed()
+
+
+@frappe.whitelist()
+def get_leave_types(employee, date=None):
+	"""HRMS mobile/list of leave types, restricted during resign/notice period."""
+	from hrms.api import get_leave_types as hrms_get_leave_types
+
+	types = hrms_get_leave_types(employee, date)
+	allowed = get_leave_type_filter_for_employee(employee)
+	if not allowed:
+		return types
+	allowed_set = set(allowed)
+	return [lt for lt in types if lt in allowed_set]
+
+
 def validate_resigned_employee_leave_type(doc, method=None):
 	"""
 	#11 Resignation Option (Track B)
 
-	Resigned / relieved employees may only apply LWP or Sick Leave.
+	Resigned / notice-period employees may only apply LWP or Sick Leave.
 	HR roles can override.
 	"""
 	if getattr(frappe.flags, "ignore_resigned_leave_type_check", False):
@@ -314,20 +372,13 @@ def validate_resigned_employee_leave_type(doc, method=None):
 	if not doc.employee or not doc.leave_type:
 		return
 
-	emp = frappe.db.get_value(
-		"Employee", doc.employee, ["status", "relieving_date"], as_dict=True
-	)
-	if not emp:
-		return
-
-	is_resigned = emp.status == "Left" or bool(emp.relieving_date)
-	if not is_resigned:
+	if not employee_in_resign_period(doc.employee):
 		return
 
 	if doc.leave_type not in ALLOWED_RESIGNED_LEAVE_TYPES:
 		frappe.throw(
 			_(
-				"Resigned employees can only apply for Leave Without Pay or Sick Leave. "
+				"During resignation / notice period you can only apply for Leave Without Pay or Sick Leave. "
 				"Selected leave type: {0}."
 			).format(frappe.bold(doc.leave_type)),
 			title=_("Leave Type Not Allowed"),
@@ -336,8 +387,8 @@ def validate_resigned_employee_leave_type(doc, method=None):
 
 def notify_super_hod_if_needed(doc, method=None):
 	"""
-	#4 Extended Leave Approval — when HOD sends a backdated leave (working days
-	at or above threshold) to Super HOD, share the document and create ToDos.
+	#4 Extended Leave Approval — when HOD sends leave at or above the working-day
+	threshold to Super HOD, share the document and create ToDos.
 	Sharing is required so User Permissions on Employee cannot block Super HOD.
 	"""
 	if doc.get("workflow_state") != SUPER_HOD_STATE:

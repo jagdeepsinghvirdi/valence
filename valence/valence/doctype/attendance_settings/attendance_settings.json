@@ -49,7 +49,7 @@
   },
   {
    "default": "3",
-   "description": "Working days from the leave/request START date (holidays and weekly offs excluded). Employee can create backdated Leave or OD/WFH only if from_date is within this many working days before today. Does not apply to approval — HOD / Super HOD can approve anytime. HR can override. Default 3.",
+   "description": "Working days after the leave/request END date (holidays and weekly offs excluded). Employee can create backdated Leave or OD/WFH only until this many working days have passed after to_date. Does not apply to approval — HOD / Super HOD can approve anytime. HR can override. Default 3.",
    "fieldname": "leave_creation_window_days",
    "fieldtype": "Int",
    "label": "Backdated Creation Window (Days)",
@@ -58,7 +58,7 @@
   },
   {
    "default": "3",
-   "description": "Working days (holidays and week offs excluded). Applies only to backdated Leave: this many working days or more also needs Super HOD. Below this value needs only HOD. Future / same-day leave needs only HOD regardless of length. All OD/WFH requests always need Super HOD. Default 3.",
+   "description": "Working days (holidays and week offs excluded). Leave or OD/WFH of this many working days or more also needs Super HOD after HOD, including future and same-day requests. Below this value needs only HOD. Default 3.",
    "fieldname": "super_hod_working_days_threshold",
    "fieldtype": "Int",
    "label": "Super HOD After Working Days",

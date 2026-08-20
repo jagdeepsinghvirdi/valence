@@ -2,15 +2,13 @@
 #3 / #4 Leave Application approval routing (Track B)
 
 - Backdated leave is allowed only within Attendance Settings → Backdated
-  Creation Window (Days) counted from the leave START date in working days
+  Creation Window (Days) counted after the leave END date in working days
   (holidays + weekly offs excluded, default 3). This is a creation rule, not approval.
-- Future / same-day leave is HOD-only (no Super HOD), regardless of length.
-- Super HOD applies only to backdated leave (from_date before today).
+- Super HOD applies when working days are at or above Attendance Settings →
+  Super HOD After Working Days (default 3), for future, same-day, and backdated leave.
 - Working leave days exclude holidays + week offs.
-- Super HOD threshold is configurable in Attendance Settings → Super HOD After
-  Working Days (default 3). 3 working days or more need Super HOD.
-- Backdated + working days < threshold → HOD Approve → Approved
-- Backdated + working days >= threshold → HOD Approve → Pending Super HOD → Super HOD Approve
+- Working days below the threshold → HOD Approve → Approved
+- Working days at or above the threshold → HOD Approve → Pending Super HOD → Super HOD Approve
 """
 
 from __future__ import annotations
@@ -43,25 +41,15 @@ _THRESHOLD_EXPR = (
 	f"float(frappe.db.get_value('{SETTINGS_DOCTYPE}', '{SETTINGS_DOCTYPE}', "
 	f"'{THRESHOLD_FIELD}') or {DEFAULT_THRESHOLD})"
 )
-# Super HOD only when from_date is before today. Uses frappe.utils (safe_eval whitelist).
-COND_BACKDATED = (
-	"frappe.utils.get_datetime(doc.from_date).date() < frappe.utils.now_datetime().date()"
-)
-COND_NOT_BACKDATED = (
-	"frappe.utils.get_datetime(doc.from_date).date() >= frappe.utils.now_datetime().date()"
-)
-COND_SHORT = (
-	f"({COND_NOT_BACKDATED}) or "
-	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) < {_THRESHOLD_EXPR})"
-)
-COND_LONG = (
-	f"({COND_BACKDATED}) and "
-	f"(float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) >= {_THRESHOLD_EXPR})"
-)
+# Super HOD when working days >= Attendance Settings threshold (any leave dates).
+COND_SHORT = f"float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) < {_THRESHOLD_EXPR}"
+COND_LONG = f"float(doc.{WORKING_LEAVE_DAYS_FIELD} or 0) >= {_THRESHOLD_EXPR}"
 
 
 def after_migrate():
 	ensure_leave_application_workflow()
+	repair_historical_leave_workflow_states()
+	frappe.db.commit()
 
 
 def ensure_leave_application_workflow():
@@ -73,9 +61,43 @@ def ensure_leave_application_workflow():
 	_ensure_workflow_actions()
 	_ensure_super_hod_permissions()
 	_ensure_employee_field_ignores_user_permissions("Leave Application")
+	_hide_leave_application_status()
 	_ensure_workflow()
 	frappe.clear_cache()
 	frappe.db.commit()
+
+
+def repair_historical_leave_workflow_states():
+	"""Show old approved/rejected leaves as Approved/Rejected, not Draft.
+
+	HRMS `status` is the source of truth. List view uses `workflow_state`, which
+	can stay Draft when the workflow field was added (default Draft fills
+	existing rows; Frappe only backfills *empty* states). Does not change
+	docstatus or leave ledger.
+	"""
+	if not frappe.db.exists("DocType", "Leave Application"):
+		return
+	if "workflow_state" not in frappe.get_meta("Leave Application").get_valid_columns():
+		return
+
+	frappe.db.sql(
+		"""
+		UPDATE `tabLeave Application`
+		SET `workflow_state` = %s
+		WHERE `status` = 'Approved'
+		AND coalesce(`workflow_state`, '') IN ('Draft', '')
+		""",
+		(STATE_APPROVED,),
+	)
+	frappe.db.sql(
+		"""
+		UPDATE `tabLeave Application`
+		SET `workflow_state` = %s
+		WHERE `status` = 'Rejected'
+		AND coalesce(`workflow_state`, '') IN ('Draft', '')
+		""",
+		(STATE_REJECTED,),
+	)
 
 
 def get_super_hod_working_days_threshold() -> int:
@@ -84,7 +106,7 @@ def get_super_hod_working_days_threshold() -> int:
 
 
 def get_leave_creation_window_days() -> int:
-	"""Working-day window from start date for creating backdated Leave / OD / WFH.
+	"""Working-day window after end date for creating backdated Leave / OD / WFH.
 
 	Holidays and weekly offs are excluded. Default 3.
 	"""
@@ -137,9 +159,8 @@ def _ensure_working_leave_days_field():
 			(
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Super HOD for backdated leave of 3 working days or more. "
-				"Future / same-day leave needs only HOD, regardless of length. "
-				"Backdated leave is allowed."
+				"(default 3). This many working days or more also needs Super HOD, "
+				"including future and same-day leave. Below this value needs only HOD."
 			),
 			update_modified=False,
 		)
@@ -159,9 +180,8 @@ def _ensure_working_leave_days_field():
 			"description": (
 				"Working days in leave period excluding holidays and week offs. "
 				"Compared to Attendance Settings → Super HOD After Working Days "
-				"(default 3). Super HOD for backdated leave of 3 working days or more. "
-				"Future / same-day leave needs only HOD, regardless of length. "
-				"Backdated leave is allowed."
+				"(default 3). This many working days or more also needs Super HOD, "
+				"including future and same-day leave. Below this value needs only HOD."
 			),
 		}
 	).insert(ignore_permissions=True)
@@ -232,6 +252,38 @@ def _ensure_employee_field_ignores_user_permissions(dt: str):
 			"module": "Valence",
 		}
 	).insert(ignore_permissions=True)
+
+
+def _ensure_docfield_property(dt: str, fieldname: str, property: str, value: str, property_type: str):
+	if not frappe.db.exists("DocType", dt):
+		return
+	if not frappe.get_meta(dt).has_field(fieldname):
+		return
+
+	filters = {"doc_type": dt, "field_name": fieldname, "property": property}
+	name = frappe.db.exists("Property Setter", filters)
+	if name:
+		frappe.db.set_value("Property Setter", name, "value", value, update_modified=False)
+		return
+
+	frappe.get_doc(
+		{
+			"doctype": "Property Setter",
+			"doctype_or_field": "DocField",
+			"doc_type": dt,
+			"field_name": fieldname,
+			"property": property,
+			"property_type": property_type,
+			"value": value,
+			"module": "Valence",
+		}
+	).insert(ignore_permissions=True)
+
+
+def _hide_leave_application_status():
+	"""HRMS Status is synced from workflow; the badge already shows workflow_state."""
+	_ensure_docfield_property("Leave Application", "status", "hidden", "1", "Check")
+	_ensure_docfield_property("Leave Application", "status", "reqd", "0", "Check")
 
 
 def _ensure_workflow_states():
@@ -306,7 +358,7 @@ def _ensure_workflow():
 			0,
 			ROLE_SUPER_HOD,
 			"Open",
-			"Awaiting Super HOD (backdated leave of 3+ working days)",
+			"Awaiting Super HOD (leave of 3+ working days)",
 		),
 		_state_row(STATE_APPROVED, 1, "HR Manager", "Approved", "Leave approved"),
 		_state_row(STATE_REJECTED, 1, "HR Manager", "Rejected", "Leave rejected"),

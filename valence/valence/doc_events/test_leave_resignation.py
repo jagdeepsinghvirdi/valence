@@ -10,6 +10,7 @@ import frappe
 from frappe.utils import nowdate
 
 from valence.valence.doc_events.leave_application import (
+	get_leave_type_filter_for_employee,
 	validate_resigned_employee_leave_type,
 )
 
@@ -63,6 +64,21 @@ def run():
 
 		allowed_sick, err3 = assert_blocked(make_doc(resigned_emp, sick), False)
 		ok("Resigned employee allowed Sick Leave", allowed_sick, err3[:80])
+
+		notice_emp = _ensure_employee("E2E Notice Emp", resigned=False)
+		if frappe.get_meta("Employee").has_field("resignation_letter_date"):
+			frappe.db.set_value("Employee", notice_emp, "resignation_letter_date", nowdate())
+			frappe.db.commit()
+			notice_blocked, errn = assert_blocked(make_doc(notice_emp, casual), True)
+			ok("Notice-period employee blocked for Casual Leave", notice_blocked, errn[:120])
+			notice_filter = get_leave_type_filter_for_employee(notice_emp)
+			ok(
+				"Notice-period dropdown only LWP and Sick Leave",
+				bool(notice_filter)
+				and set(notice_filter) <= {"Leave Without Pay", "Sick Leave"}
+				and casual not in (notice_filter or []),
+				str(notice_filter),
+			)
 
 	with patch(
 		"valence.valence.doc_events.leave_application.frappe.get_roles",

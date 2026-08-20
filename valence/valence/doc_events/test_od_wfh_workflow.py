@@ -73,19 +73,19 @@ def run():
 		if t.state == STATE_PENDING_HOD and t.action == "Approve"
 	]
 	ok("HOD Approve path exists", len(hod_approve) >= 1)
+	short_rows = [t for t in hod_approve if t.next_state == STATE_APPROVED]
+	long_rows = [t for t in hod_approve if t.next_state == STATE_PENDING_SUPER_HOD]
+	ok("HOD Approve → Approved for below-threshold OD/WFH", len(short_rows) >= 1)
+	ok("HOD Approve → Super HOD for threshold+ OD/WFH", len(long_rows) >= 1)
 	ok(
-		"Every HOD Approve goes to Super HOD (mandatory for all OD/WFH)",
-		all(t.next_state == STATE_PENDING_SUPER_HOD for t in hod_approve),
-		str({t.allowed: t.next_state for t in hod_approve}),
+		"HOD Approve → Approved uses working-day condition",
+		all(WORKING_REQUEST_DAYS_FIELD in (t.condition or "") for t in short_rows),
+		short_rows[0].condition if short_rows else "",
 	)
 	ok(
-		"HOD Approve has no length/date condition",
-		all(not (t.condition or "").strip() for t in hod_approve),
-		hod_approve[0].condition if hod_approve else "",
-	)
-	ok(
-		"No HOD Approve → Approved shortcut",
-		not any(t.next_state == STATE_APPROVED for t in hod_approve),
+		"HOD Approve → Super HOD uses working-day condition",
+		all(WORKING_REQUEST_DAYS_FIELD in (t.condition or "") for t in long_rows),
+		long_rows[0].condition if long_rows else "",
 	)
 
 	super_approve = [

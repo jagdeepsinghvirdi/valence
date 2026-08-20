@@ -53,6 +53,7 @@ doctype_js = {"Work Order" : "public/js/work_order.js",
             "Batch":"public/js/batch.js",
             "Quality Inspection":"public/js/quality_inspection.js",
 			"Shift Schedule":"public/js/shift_schedule.js",
+			"Leave Application":"public/js/leave_application.js",
 			
 }
 doctype_list_js = {"Batch":"public/js/batch_list.js",
@@ -322,6 +323,7 @@ override_whitelisted_methods = {
 	"hrms.api.roster.get_events": "valence.valence.override.whitelisted_method.roster.get_events",
 	# MariaDB 12+: bare to_date is TO_DATE(); backtick column in leave-period lookup
 	"hrms.hr.utils.get_leave_period": "valence.valence.override.leave_application.get_leave_period",
+	"hrms.api.get_leave_types": "valence.valence.doc_events.leave_application.get_leave_types",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -344,6 +346,7 @@ override_whitelisted_methods = {
 # ----------------
 before_request = [
 	"valence.valence.monkey_patch.chemical_stock_entry.apply_based_on_item_optional_patch",
+	"valence.valence.override.leave_application.apply_mariadb_leave_sql_patches",
 ]
 # after_request = ["valence.utils.after_request"]
 

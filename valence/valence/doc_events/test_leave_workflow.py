@@ -83,16 +83,16 @@ def run():
 	ok("COND_SHORT false for backdated 4 days (threshold 3)", eval_cond(COND_SHORT, long_past) is False)
 	ok("COND_LONG true for backdated 4 days (threshold 3)", eval_cond(COND_LONG, long_past) is True)
 	ok("COND_LONG true for backdated 3 days (3 or more)", eval_cond(COND_LONG, short_past) is True)
-	ok("COND_SHORT true for future 4 days (no Super HOD)", eval_cond(COND_SHORT, long_future) is True)
-	ok("COND_LONG false for future 4 days", eval_cond(COND_LONG, long_future) is False)
-	ok("COND_SHORT true for same-day 4 days", eval_cond(COND_SHORT, long_today) is True)
-	ok("COND_LONG false for same-day 4 days", eval_cond(COND_LONG, long_today) is False)
+	ok("COND_SHORT false for future 4 days (3+ needs Super HOD)", eval_cond(COND_SHORT, long_future) is False)
+	ok("COND_LONG true for future 4 days", eval_cond(COND_LONG, long_future) is True)
+	ok("COND_SHORT false for same-day 4 days", eval_cond(COND_SHORT, long_today) is False)
+	ok("COND_LONG true for same-day 4 days", eval_cond(COND_LONG, long_today) is True)
 	ok("COND_SHORT true for backdated half day", eval_cond(COND_SHORT, half_past) is True)
 	ok("needs_super_hod True for 3 @ threshold 3", needs_super_hod_approval(3) is True)
 	ok("needs_super_hod True for 4 @ threshold 3 (no date)", needs_super_hod_approval(4) is True)
 	ok(
-		"needs_super_hod False for future 4 days",
-		needs_super_hod_approval(4, from_date=future) is False,
+		"needs_super_hod True for future 4 days",
+		needs_super_hod_approval(4, from_date=future) is True,
 	)
 	ok(
 		"needs_super_hod True for backdated 4 days",
@@ -108,8 +108,8 @@ def run():
 		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 4, "from_date": past})) is False,
 	)
 	ok(
-		"Future 6 days still HOD-only at threshold 5",
-		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 6, "from_date": future})) is False,
+		"Future 6 days needs Super HOD at threshold 5",
+		eval_cond(COND_LONG, frappe._dict({WORKING_LEAVE_DAYS_FIELD: 6, "from_date": future})) is True,
 	)
 	ok(
 		"get_super_hod_working_days_threshold reads 5",
@@ -161,7 +161,7 @@ def run():
 	failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== SUMMARY ==========")
 	print(f"PASS: {passed}  FAIL: {failed}  TOTAL: {len(results)}")
-	print("Rule: future/same-day → HOD only; backdated < threshold → HOD; backdated >= threshold → Super HOD.")
+	print("Rule: working days < threshold → HOD only; working days >= threshold → Super HOD (any dates).")
 	print("Threshold is configurable by HR / Leave Approver / Super HOD.")
 	if failed:
 		frappe.throw(

@@ -1,8 +1,8 @@
 """
 #7 OD/WFH rules on standard Attendance Request (Work From Home / On Duty).
 
-- Working days exclude holidays + week offs (informational)
-- Every OD/WFH request requires HOD then Super HOD (including half-day / same-day)
+- Working days exclude holidays + week offs (used for Super HOD routing)
+- Super HOD after HOD when working days >= Attendance Settings threshold
 - Reason / explanation is mandatory
 - Employees cannot approve their own request
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import date_diff, formatdate, getdate
+from frappe.utils import cint, date_diff, formatdate, getdate
 
 from hrms.hr.doctype.leave_application.leave_application import get_leave_approver
 from hrms.hr.utils import share_doc_with_approver
@@ -72,7 +72,13 @@ def set_request_day_counts(doc):
 
 	doc.set(
 		WORKING_REQUEST_DAYS_FIELD,
-		count_working_leave_days(doc.employee, doc.from_date, doc.to_date),
+		count_working_leave_days(
+			doc.employee,
+			doc.from_date,
+			doc.to_date,
+			half_day=cint(doc.get("half_day")),
+			half_day_date=doc.get("half_day_date"),
+		),
 	)
 
 

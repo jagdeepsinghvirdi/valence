@@ -72,7 +72,7 @@
   },
   {
    "default": "2",
-   "description": "Maximum duration allowed for a single Short Leave Application. Requests longer than this are blocked and must instead be applied as Half Day / Full Day Leave.",
+   "description": "Maximum duration allowed for a single Personal Short Leave. Official Short Leave has no duration cap. Requests longer than this must be applied as Half Day / Full Day Leave instead. Approved Short Leave (Personal or Official) credits the actual late-in / early-out gap toward attendance working hours.",
    "fieldname": "short_leave_max_duration_hours",
    "fieldtype": "Float",
    "label": "Max Duration Per Short Leave (Hours)",

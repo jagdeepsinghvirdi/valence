@@ -12,6 +12,10 @@ updated after client review of the demo):
     Day Leave instead. Also capped per month (default 2, configurable).
   - Official Short Leave: NO duration cap, NO monthly cap — still logged
     and counted for records, just not limited.
+  - Approved Short Leave (Personal or Official) adjusts attendance
+    working hours by the actual late-in / early-out gap vs the shift
+    (not by leave duration). Half Day / Present uses Shift Type thresholds
+    on those adjusted hours.
   - Only ONE Short Leave Application allowed per employee per day, any
     type.
   - Single-level approval by the Reporting Head (Leave Approver role).
@@ -105,6 +109,39 @@ def on_update(doc, method=None):
 	sync_status_from_workflow(doc)
 	if doc.get("workflow_state") == "Pending Approval":
 		share_with_approver(doc)
+	refresh_attendance_after_short_leave_approval(doc)
+
+
+def refresh_attendance_after_short_leave_approval(doc):
+	"""Recompute Attendance working hours / status when Short Leave becomes Approved."""
+	if not doc.employee or not doc.date:
+		return
+	if doc.get("workflow_state") != "Approved":
+		return
+
+	before = doc.get_doc_before_save()
+	if before and before.get("workflow_state") == "Approved":
+		return
+
+	from valence.valence.doc_events.attendance import set_status
+
+	names = frappe.get_all(
+		"Attendance",
+		filters={
+			"employee": doc.employee,
+			"attendance_date": doc.date,
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+	)
+	for name in names:
+		try:
+			set_status(frappe.get_doc("Attendance", name), "validate")
+		except Exception:
+			frappe.log_error(
+				title="Short Leave: attendance refresh failed",
+				message=frappe.get_traceback(),
+			)
 
 
 # ---------------------------------------------------------------------------

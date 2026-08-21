@@ -33,7 +33,7 @@ HOD_USER = "e2e.hod@valence.test"
 SUPER_HOD_USER = "e2e.superhod@valence.test"
 
 FROM_OFFSET_DAYS = 20
-BACKDATED_OFFSET = -2  # within 72-hour window so creation is allowed
+BACKDATED_OFFSET = -40  # far enough that a 4-day span cannot overlap same-day AR
 
 
 def run():
@@ -308,15 +308,24 @@ def _clear_attendance(employee, start, end):
 
 
 def _next_free_attendance_date(employee, start, forward=True):
-	"""Skip dates that already have Attendance so HRMS does not refuse the request."""
+	"""Skip dates that already have Attendance or Attendance Request overlap."""
 	d = getdate(start)
 	step = 1 if forward else -1
-	for _ in range(60):
-		exists = frappe.db.exists(
+	for _ in range(90):
+		att_exists = frappe.db.exists(
 			"Attendance",
 			{"employee": employee, "attendance_date": d, "docstatus": ["<", 2]},
 		)
-		if not exists:
+		ar_exists = frappe.db.exists(
+			"Attendance Request",
+			{
+				"employee": employee,
+				"docstatus": ["<", 2],
+				"from_date": ["<=", d],
+				"to_date": [">=", d],
+			},
+		)
+		if not att_exists and not ar_exists:
 			return d
 		d = add_days(d, step)
 	return getdate(start)

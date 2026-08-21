@@ -26,10 +26,32 @@ redis-cli -p 13000 ping >/dev/null 2>&1 || redis-server config/redis_cache.conf 
 redis-cli -p 11000 ping >/dev/null 2>&1 || redis-server config/redis_queue.conf --daemonize yes
 
 if lsof -nP -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "Already listening on :8000 — open http://127.0.0.1:8000"
+  echo "Already listening on :8000"
+  echo "  Demo:   http://demovalence.localhost:8000"
+  echo "  Madhav: http://madhav.localhost:8000"
   exit 0
 fi
 
-echo "Starting web server on http://127.0.0.1:8000 (Ctrl+C to stop)..."
+# Ensure Host-based multi-site routing (bench serve --site locks to one site)
+python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path("sites/common_site_config.json")
+cfg = json.loads(p.read_text())
+if not cfg.get("dns_multitenant"):
+    cfg["dns_multitenant"] = True
+    p.write_text(json.dumps(cfg, indent=1) + "\n")
+    print("Enabled dns_multitenant in common_site_config.json")
+PY
+
+echo "Starting multi-site server on :8000 (Ctrl+C to stop)..."
+echo "  Demo:   http://demovalence.localhost:8000"
+echo "  Madhav: http://madhav.localhost:8000"
+echo "  (Use site hostname — plain 127.0.0.1 will not pick a site.)"
+# site=None so HTTP Host selects demovalence.localhost / madhav.localhost / etc.
 # --noreload avoids the dev reloader dying with “apps.txt Not Found” after file changes
-exec bench serve --port 8000 --noreload
+cd sites
+exec ../env/bin/python -c "
+from frappe.app import serve
+serve(port=8000, no_reload=True, site=None, sites_path='.')
+"

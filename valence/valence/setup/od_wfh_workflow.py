@@ -197,7 +197,17 @@ def _ensure_workflow():
 			_transition(STATE_DRAFT, "Apply", STATE_PENDING_HOD, role, allow_self_approval=1)
 		)
 
-	for role in ("Leave Approver", "HR Manager", "HR User"):
+	for role in ("Leave Approver", "Super HOD", "HR Manager", "HR User", "Administrator"):
+		transitions.append(
+			_transition(
+				STATE_PENDING_HOD,
+				"Approve",
+				STATE_APPROVED,
+				role,
+				condition=COND_SHORT,
+				allow_self_approval=0,
+			)
+		)
 		transitions.append(
 			_transition(
 				STATE_PENDING_HOD,
@@ -228,7 +238,7 @@ def _ensure_workflow():
 			)
 		)
 
-	for role in (ROLE_SUPER_HOD, "HR Manager"):
+	for role in (ROLE_SUPER_HOD, "HR Manager", "Administrator"):
 		transitions.append(
 			_transition(
 				STATE_PENDING_SUPER_HOD,

@@ -159,16 +159,26 @@ def _get_leave_or_throw(name: str):
 
 
 def _actions_for_user(doc) -> list[str]:
-	"""Unique workflow action names available to the current session user."""
+	"""Unique workflow action names available to the current session user.
+
+	Filters Approve/Reject through Extended Leave Approval hierarchy so mobile
+	matches Desk (assigned leave approver / no self-approval / HR / Admin).
+	"""
 	if not get_workflow_name(doc.doctype):
 		return []
 	try:
 		transitions = get_transitions(doc)
 	except Exception:
 		return []
+
+	from valence.valence.approval_hierarchy import user_may_approve_or_reject
+
 	seen: list[str] = []
 	for t in transitions:
 		action = t.get("action") if isinstance(t, dict) else getattr(t, "action", None)
-		if action and action not in seen:
-			seen.append(action)
+		if not action or action in seen:
+			continue
+		if action in ("Approve", "Reject") and not user_may_approve_or_reject(doc):
+			continue
+		seen.append(action)
 	return seen

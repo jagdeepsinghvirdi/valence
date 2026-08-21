@@ -17,6 +17,14 @@ def validate(doc, method=None):
 	validate_no_leave_on_present_day(doc, method)
 	validate_resigned_employee_leave_type(doc, method)
 	sync_leave_status_from_workflow(doc, method)
+	# Extended Leave Approval Workflow (self-approval + hierarchy)
+	from valence.valence.approval_hierarchy import (
+		validate_approver_authority,
+		validate_no_self_approval,
+	)
+
+	validate_no_self_approval(doc, label=_("leave application"))
+	validate_approver_authority(doc, label=_("leave application"))
 
 
 def before_submit(doc, method=None):
@@ -26,6 +34,9 @@ def before_submit(doc, method=None):
 
 def on_update(doc, method=None):
 	"""Side-effects after save (workflow notifications, etc.)."""
+	from valence.valence.approval_hierarchy import route_pending_hod
+
+	route_pending_hod(doc)
 	notify_super_hod_if_needed(doc, method)
 
 
@@ -408,12 +419,26 @@ def share_doc_with_super_hod(doc):
 
 	Must ignore share-permission checks: HOD (Leave Approver) often cannot Share,
 	and swallowing that error is what blocked Super HOD in team-lead testing.
+
+	If no Super HOD / HR Manager users exist, fall back to Administrator (DBA)
+	so the request cannot get stuck without an approver.
 	"""
 	if not doc.name:
 		return
+	from valence.valence.approval_hierarchy import get_applicant_user, get_hr_users
+
 	users = _users_with_roles(["Super HOD", "HR Manager"])
+	applicant = get_applicant_user(doc.get("employee"))
+	users = [u for u in users if u and u != applicant]
+	# Ensure HR users (excluding applicant) are included
+	for hr in get_hr_users(exclude_user=applicant):
+		if hr not in users:
+			users.append(hr)
+	if not users:
+		users = ["Administrator"]
+
 	for user in users:
-		if user in ("Administrator", "Guest"):
+		if user in ("Guest",):
 			continue
 		try:
 			frappe.share.add_docshare(

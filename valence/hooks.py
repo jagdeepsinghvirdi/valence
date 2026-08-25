@@ -257,6 +257,12 @@ SerialBatchCreation.create_batch = create_batch
 from valence.valence.monkey_patch.chemical_stock_entry import apply_based_on_item_optional_patch
 
 apply_based_on_item_optional_patch()
+
+# Extended Leave Approval: Desk workflow buttons respect assigned leave approver /
+# no self-approval / HR / Administrator fallback (same rules as validate + mobile API)
+from valence.valence.approval_hierarchy import patch_workflow_approval_access
+
+patch_workflow_approval_access()
 # Scheduled Tasks
 # --------------
 

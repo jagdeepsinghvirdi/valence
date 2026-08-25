@@ -38,6 +38,15 @@ def validate(doc, method=None):
 	set_request_day_counts(doc)
 	validate_mandatory_explanation(doc)
 	validate_leave_creation_window(doc)
+	# Extended Leave Approval Workflow — same self-approval + hierarchy as Leave
+	from valence.valence.approval_hierarchy import (
+		validate_approver_authority,
+		validate_no_self_approval as validate_hierarchy_self_approval,
+	)
+
+	validate_hierarchy_self_approval(doc, label=_("OD/WFH request"))
+	validate_approver_authority(doc, label=_("OD/WFH request"))
+	# Keep legacy helper name for older tests / imports
 	validate_no_self_approval(doc)
 
 
@@ -47,6 +56,10 @@ def before_insert(doc, method=None):
 
 
 def on_update(doc, method=None):
+	from valence.valence.approval_hierarchy import route_pending_hod
+
+	route_pending_hod(doc)
+	# Backward-compatible share with raw leave approver when present
 	approver = get_leave_approver(doc.employee)
 	if approver:
 		share_doc_with_approver(doc, approver)

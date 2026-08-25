@@ -141,11 +141,11 @@ def _get_non_working_dates(employee, start, end) -> set:
 			non_working.add(getdate(d))
 
 	# Shift Assignment weekly off weekday (e.g. Sunday)
-	off_weekday = _get_shift_weekly_off_weekday(employee, start, end)
-	if off_weekday:
+	off_weekdays = _get_shift_weekly_off_weekday(employee, start, end)
+	if off_weekdays:
 		current = start
 		while current <= end:
-			if current.strftime("%A") == off_weekday:
+			if current.strftime("%A").lower() in off_weekdays:
 				non_working.add(current)
 			current = add_days(current, 1)
 
@@ -154,20 +154,9 @@ def _get_non_working_dates(employee, start, end) -> set:
 
 def _get_shift_weekly_off_weekday(employee, start, end):
 	"""Return weekday name from active Shift Assignment.custom_off_day, if any."""
-	if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
-		return None
+	from valence.api import get_shift_weekly_off_days
 
-	assignments = frappe.get_all(
-		"Shift Assignment",
-		filters={"employee": employee, "start_date": ["<=", end], "docstatus": 1},
-		or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
-		fields=["custom_off_day"],
-		order_by="start_date desc",
-	)
-	for row in assignments:
-		if row.custom_off_day:
-			return row.custom_off_day
-	return None
+	return get_shift_weekly_off_days(employee, end)
 
 
 def validate_leave_creation_window(doc, method=None):

@@ -28,20 +28,10 @@ def get_weekly_offs(month_start, month_end, employee_filters):
     start, end = getdate(month_start), getdate(month_end)
     weekly_offs = {}
 
+    from valence.api import get_shift_weekly_off_days
+
     for emp in employees:
-        assignments = []
-        if frappe.db.has_column("Shift Assignment", "custom_off_day"):
-            assignments = frappe.get_all(
-                "Shift Assignment",
-                filters={"employee": emp.name, "start_date": ["<=", end], "docstatus": 1},
-                or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
-                fields=["custom_off_day"],
-            )
-        off_weekday = None
-        for a in assignments:
-            if a.custom_off_day:
-                off_weekday=a.custom_off_day
-                break
+        off_weekdays = get_shift_weekly_off_days(emp.name, end)
 
         holiday_weekly_off_dates = set()
         if emp.holiday_list:
@@ -54,7 +44,7 @@ def get_weekly_offs(month_start, month_end, employee_filters):
 
         date = start
         while date <= end:
-            if date in holiday_weekly_off_dates or date.strftime("%A") == off_weekday:
+            if date in holiday_weekly_off_dates or date.strftime("%A").lower() in off_weekdays:
                 weekly_offs.setdefault(emp.name, []).append({
                     "holiday": f"weekly-off-{emp.name}-{date}",
                     "holiday_date": str(date),

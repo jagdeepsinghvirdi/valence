@@ -22,7 +22,7 @@ class ShiftType(_ShiftType):
 		
 		# Skip dates with existing attendance
 		marked_attendance_dates = self.get_marked_attendance_dates_between(employee, start_date, end_date)
-		return sorted(set(date_range) - set(marked_attendance_dates))
+		return sorted(set(date_range) - set(holiday_dates) - set(marked_attendance_dates))
 
     
 

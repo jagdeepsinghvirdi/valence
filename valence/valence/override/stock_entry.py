@@ -1,5 +1,6 @@
 import frappe
 from erpnext.stock.doctype.stock_entry.stock_entry import get_available_materials
+from erpnext.stock.utils import get_incoming_rate
 from frappe.utils import (
 	cint,
 	comma_or,
@@ -69,9 +70,39 @@ class StockEntry(_StockEntry):
 		self._drop_raw_materials_for_consumption_costing()
 		parent = super().get_basic_rate_for_manufactured_item
 		try:
-			return parent(finished_item_qty, outgoing_items_cost, has_consumption_basis)
+			rate = parent(finished_item_qty, outgoing_items_cost, has_consumption_basis)
 		except TypeError:
-			return parent(finished_item_qty, outgoing_items_cost)
+			rate = parent(finished_item_qty, outgoing_items_cost)
+
+		# Consumption + scrap costing can push FG rate below zero when scrap value
+		# exceeds booked consumption cost (common on partial Finish). ERPNext then
+		# blocks save with NonNegativeError on Basic Rate.
+		return max(0.0, flt(rate))
+
+	def set_rate_for_outgoing_items(self, reset_outgoing_rate=True, raise_error_if_no_rate=True):
+		outgoing_items_cost = 0.0
+		for d in self.get("items"):
+			if d.s_warehouse:
+				if reset_outgoing_rate:
+					args = self.get_args_for_incoming_rate(d)
+					rate = get_incoming_rate(args, raise_error_if_no_rate)
+					# Never pass negative valuation into Basic Rate (Stock Entry Detail is non_negative).
+					d.basic_rate = max(0.0, flt(rate)) if rate is not None else 0.0
+
+				d.basic_rate = max(0.0, flt(d.basic_rate))
+				d.basic_amount = flt(flt(d.transfer_qty) * flt(d.basic_rate), d.precision("basic_amount"))
+				if not d.t_warehouse:
+					outgoing_items_cost += flt(d.basic_amount)
+
+		return outgoing_items_cost
+
+	def set_basic_rate(self, reset_outgoing_rate=True, raise_error_if_no_rate=True):
+		self._drop_raw_materials_for_consumption_costing()
+		super().set_basic_rate(reset_outgoing_rate, raise_error_if_no_rate)
+		for d in self.get("items") or []:
+			if flt(d.basic_rate) < 0:
+				d.basic_rate = 0.0
+				d.basic_amount = 0.0
 
 	def add_transfered_raw_materials_in_items(self) -> None:
 		# Consumption already booked RM; Finish must not backflush them again.

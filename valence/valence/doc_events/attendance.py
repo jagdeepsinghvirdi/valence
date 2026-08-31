@@ -32,6 +32,7 @@ def get_approved_short_leave_hours(employee, attendance_date):
 	return flt(total[0][0]) if total and total[0][0] else 0.0
 
 
+
 def get_approved_official_short_leave_hours(employee, attendance_date):
 	"""Backward-compatible alias — both Personal and Official now count."""
 	return get_approved_short_leave_hours(employee, attendance_date)
@@ -276,6 +277,9 @@ def set_status(self, method):
 			self.db_set("working_hours", hours)
 			self.db_set("status", "Present")
 		else:
+			shift_len = get_shift_duration_hours(self.shift)
+			if shift_len and hours > shift_len:
+				hours = shift_len
 			_apply_hours_status(self, hours, self.shift)
 
 

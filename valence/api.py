@@ -56,10 +56,16 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
     attendance_doc.db_set('out_time', out_time)
 
     # 7. Run your status logic
-    # Your set_status already uses db_set for status and working_hours, 
+    # Your set_status already uses db_set for status and working_hours,
     # so it will work fine on a submitted document.
-    set_status(attendance_doc, "validate")
-    
+    if in_time or out_time:
+        set_status(attendance_doc, "validate")
+    else:
+        from valence.valence.doc_events.attendance import resolve_no_punch_status
+
+        resolve_no_punch_status(employee, attendance_date, attendance_doc.name)
+        attendance_doc.reload()
+
     return {
         "in_time": in_time,
         "out_time": out_time,
@@ -130,62 +136,19 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
         }
 
     # ------------------------------------------------
-    # Case 2: No punches → Holiday / Weekly Off
+    # Case 2: No punches → Holiday / Weekly Off / Absent
     # ------------------------------------------------
 
-    holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
-    if holiday_list and frappe.db.exists(
-        "Holiday",
-        {"holiday_date": date_obj, "parent": holiday_list}
-    ):
-        holiday_doc = frappe.get_doc("Holiday List", holiday_list)
+    from valence.valence.doc_events.attendance import resolve_no_punch_status
 
-        for holiday in holiday_doc.holidays:
-            if holiday.holiday_date == date_obj:
-                if holiday.weekly_off:
-                    frappe.db.set_value(
-                        "Attendance",
-                        attendance,
-                        {
-                            "status": "Weekly Off",
-                            "leave_type": None
-                        }
-                    )
-                    return {
-                        "attendance": attendance,
-                        "message": f"{attendance}: Marked as Weekly Off."
-                    }
-                else:
-                    frappe.db.set_value(
-                        "Attendance",
-                        attendance,
-                        {
-                            "status": "Holiday",
-                            "leave_type": None
-                        }
-                    )
-                    return {
-                        "attendance": attendance,
-                        "message": f"{attendance}: Marked as Holiday."
-                    }
+    status = resolve_no_punch_status(employee, date_obj, attendance)
 
-   # Shift Assignment weekly off check
-    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
-        return None
+    return {
+        "attendance": attendance,
+        "message": f"{attendance}: Marked as {status}."
+    }
 
-    shift_assignments = frappe.get_all(
-        "Shift Assignment",
-        filters={"employee": employee, "start_date": ["<=", date_obj]},
-        fields=["custom_off_day", "end_date"]
-    )
-    valid_shifts = [s for s in shift_assignments if not s.end_date or s.end_date >= date_obj]
 
-    if valid_shifts:
-        weekday = date_obj.strftime("%A")
-        if valid_shifts[0].custom_off_day == weekday:
-            frappe.db.set_value("Attendance", attendance, {"status": "Weekly Off", "leave_type": None})
-            return {"attendance": attendance, "message": f"{attendance}: Marked as Weekly Off."}
-        
 # @frappe.whitelist()
 # def get_offday_status(employee, attendance_date,attendance):
     
@@ -236,19 +199,39 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
 #             frappe.db.commit()
 #         return "Weekly Off"
 
-@frappe.whitelist()
-def get_offday_status(employee, attendance_date, attendance):
-    
-    from datetime import datetime
-    
-    if isinstance(attendance_date, str):
-        date_obj = datetime.strptime(attendance_date, "%Y-%m-%d").date()
-    else:
-        date_obj = attendance_date
-    
-    # Step 1: Check Holiday List (FIXED LOGIC)
+def get_shift_weekly_off_days(employee, date_obj):
+    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        return set()
+
+    assignments = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "start_date": ["<=", date_obj],
+            "docstatus": 1,
+        },
+        or_filters=[["end_date", ">=", date_obj], ["end_date", "is", "not set"]],
+        fields=["custom_off_day"],
+        order_by="start_date desc",
+    )
+
+    for row in assignments:
+        raw = (row.custom_off_day or "").strip()
+        if not raw:
+            continue
+        return {d.strip().lower() for d in raw.split(",") if d.strip()}
+
+    return set()
+
+
+def get_day_type(employee, attendance_date):
+    if not employee or not attendance_date:
+        return None
+
+    date_obj = getdate(attendance_date)
+
     holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
-    
+
     if holiday_list:
         holiday = frappe.db.get_value(
             "Holiday",
@@ -261,49 +244,25 @@ def get_offday_status(employee, attendance_date, attendance):
         )
 
         if holiday:
-            status = "Weekly Off" if holiday.weekly_off else "Holiday"
+            return "Weekly Off" if holiday.weekly_off else "Holiday"
 
-            if attendance:
-                frappe.db.set_value("Attendance", attendance, {
-                    "status": status,
-                    "leave_type": None
-                })
-                frappe.db.commit()
+    if date_obj.strftime("%A").lower() in get_shift_weekly_off_days(employee, date_obj):
+        return "Weekly Off"
 
-            return status
+    return None
 
-    # Step 2: Check Shift Assignment for weekly off
-    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
-        return None
 
-    shift_assignment = frappe.get_all(
-        "Shift Assignment",
-        filters={
-            "employee": employee,
-            "start_date": ["<=", date_obj],
-        },
-        fields=["name", "shift_type", "custom_off_day", "end_date"]
-    )
+@frappe.whitelist()
+def get_offday_status(employee, attendance_date, attendance=None):
+    status = get_day_type(employee, attendance_date)
 
-    valid_shift_assignments = []
+    if status and attendance:
+        frappe.db.set_value("Attendance", attendance, {
+            "status": status,
+            "leave_type": None
+        })
 
-    for shift in shift_assignment:
-        if not shift["end_date"] or shift["end_date"] >= date_obj:
-            valid_shift_assignments.append(shift)
-
-    if valid_shift_assignments:
-        weekday = date_obj.strftime('%A').lower()
-        off_days_raw = valid_shift_assignments[0]["custom_off_day"] or ""
-        off_days = [d.strip().lower() for d in off_days_raw.split(",") if d.strip()]
-
-        if weekday in off_days:
-            if attendance:
-                frappe.db.set_value("Attendance", attendance, {
-                    "status": "Weekly Off",
-                    "leave_type": None
-                })
-                frappe.db.commit()
-            return "Weekly Off"
+    return status
 
 @frappe.whitelist()
 def fetch_lrf_details(lrf_name):

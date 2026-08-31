@@ -16,7 +16,9 @@
   "short_leave_max_duration_hours",
   "column_break_slas1",
   "short_leave_personal_monthly_cap",
-  "short_leave_official_monthly_cap"
+  "short_leave_official_monthly_cap",
+  "offday_attendance_section",
+  "offday_full_day_hours"
  ],
  "fields": [
   {
@@ -100,6 +102,20 @@
    "fieldtype": "Int",
    "label": "Official Short Leave — Monthly Cap (0 = Unlimited)",
    "non_negative": 1
+  },
+  {
+   "fieldname": "offday_attendance_section",
+   "fieldtype": "Section Break",
+   "label": "Work on Weekly Off / Holiday"
+  },
+  {
+   "default": "6",
+   "description": "Minimum hours worked on a Weekly Off or Holiday to count as a full day. Below this it counts as a half day. Used for PWO / PAW and HP / HP-A reporting and Compensatory Off. Default 6.",
+   "fieldname": "offday_full_day_hours",
+   "fieldtype": "Float",
+   "label": "Full Day Hours on Weekly Off / Holiday",
+   "non_negative": 1,
+   "precision": "1"
   }
  ],
  "grid_page_length": 50,

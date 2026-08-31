@@ -1,6 +1,10 @@
 import frappe
-from frappe.utils import getdate, nowdate, add_days, get_first_day, get_last_day, flt
+from frappe.utils import getdate, nowdate, add_days, cint, get_first_day, get_last_day, flt
 from datetime import datetime, timedelta
+
+DEFAULT_OFFDAY_FULL_DAY_HOURS = 6
+DOUBLE_SHIFT_FULL_MULTIPLIER = 2.0
+DOUBLE_SHIFT_HALF_MULTIPLIER = 1.5
 
 
 def get_approved_short_leave_hours(employee, attendance_date):
@@ -26,6 +30,7 @@ def get_approved_short_leave_hours(employee, attendance_date):
 		(employee, attendance_date),
 	)
 	return flt(total[0][0]) if total and total[0][0] else 0.0
+
 
 
 def get_approved_official_short_leave_hours(employee, attendance_date):
@@ -143,48 +148,139 @@ def _apply_hours_status(attendance, hours, shift_name):
 		attendance.db_set("status", "Present")
 
 
+def get_offday_full_day_hours() -> float:
+	value = frappe.db.get_single_value("Attendance Settings", "offday_full_day_hours")
+	return flt(value) or DEFAULT_OFFDAY_FULL_DAY_HOURS
+
+
+def get_shift_midpoint(shift_name):
+	if not shift_name:
+		return None
+	start_time, end_time = frappe.db.get_value(
+		"Shift Type", shift_name, ["start_time", "end_time"]
+	) or (None, None)
+	start = _as_timedelta(start_time)
+	end = _as_timedelta(end_time)
+	if not start or not end:
+		return None
+	span = (end - start).total_seconds()
+	if span < 0:
+		span += 24 * 3600
+	if span <= 0:
+		return None
+	return start + timedelta(seconds=span / 2)
+
+
+def get_worked_half(shift_name, in_time, out_time):
+	midpoint = get_shift_midpoint(shift_name)
+	if not midpoint:
+		return None
+
+	in_dt = _parse_attendance_datetime(in_time)
+	out_dt = _parse_attendance_datetime(out_time)
+	if not in_dt or not out_dt:
+		return None
+
+	in_td = timedelta(hours=in_dt.hour, minutes=in_dt.minute, seconds=in_dt.second)
+	out_td = timedelta(hours=out_dt.hour, minutes=out_dt.minute, seconds=out_dt.second)
+	if out_td < in_td:
+		out_td += timedelta(hours=24)
+
+	before = max(0.0, (min(out_td, midpoint) - in_td).total_seconds())
+	after = max(0.0, (out_td - max(in_td, midpoint)).total_seconds())
+
+	if before <= 0 and after <= 0:
+		return None
+	if before > 0 and after > 0:
+		return "Both"
+	return "First Half" if before > 0 else "Second Half"
+
+
+def get_double_shift_factor(shift_name, hours) -> float:
+	shift_len = get_shift_duration_hours(shift_name)
+	if not shift_len or not hours:
+		return 1.0
+	ratio = flt(hours) / flt(shift_len)
+	if ratio >= DOUBLE_SHIFT_FULL_MULTIPLIER:
+		return DOUBLE_SHIFT_FULL_MULTIPLIER
+	if ratio >= DOUBLE_SHIFT_HALF_MULTIPLIER:
+		return DOUBLE_SHIFT_HALF_MULTIPLIER
+	return 1.0
+
+
+def get_attendance_request_status(doc):
+	if not doc.attendance_request:
+		return None
+
+	request = frappe.db.get_value(
+		"Attendance Request",
+		doc.attendance_request,
+		["reason", "half_day", "half_day_date"],
+		as_dict=True,
+	)
+	if not request:
+		return None
+
+	is_half_day = cint(request.half_day) and request.half_day_date and getdate(
+		request.half_day_date
+	) == getdate(doc.attendance_date)
+
+	if is_half_day:
+		if doc.in_time and doc.out_time:
+			return "Present"
+		return "Half Day"
+
+	return request.reason
+
+
+def _measured_hours(doc):
+	in_time = _parse_attendance_datetime(doc.in_time)
+	out_time = _parse_attendance_datetime(doc.out_time)
+	hours = round((out_time - in_time).total_seconds() / 3600, 1)
+
+	if has_approved_short_leave(doc.employee, doc.attendance_date):
+		gap = get_actual_shift_gap_hours(doc.shift, doc.in_time, doc.out_time)
+		if gap:
+			hours = round(hours + gap, 1)
+
+	return hours
+
+
 def set_status(self, method):
+	from valence.api import get_day_type
+
+	request_status = get_attendance_request_status(self)
+	if request_status:
+		self.db_set("status", request_status)
+		return
+
+	day_type = get_day_type(self.employee, self.attendance_date)
+
 	if not self.in_time and self.out_time:
 		self.db_set("status", "Mispunch")
 	elif not self.out_time and self.in_time:
 		self.db_set("status", "Mispunch")
-	elif self.attendance_request:
-		self.db_set(
-			"status",
-			frappe.db.get_value("Attendance Request", self.attendance_request, "reason"),
-		)
 	elif not self.in_time and not self.out_time:
-		from valence.api import get_offday_status
-
 		# No punches: cannot measure late/early gap — fall back to leave duration
 		# so approved Short Leave is not dropped as "No punch".
 		short_leave_hours = get_approved_short_leave_hours(self.employee, self.attendance_date)
 		if short_leave_hours:
 			_apply_hours_status(self, short_leave_hours, self.shift)
+		elif day_type:
+			self.db_set("status", day_type)
 		else:
-			att_status = get_offday_status(self.employee, self.attendance_date, self.name)
-			if att_status:
-				self.db_set("status", att_status)
-			else:
-				self.db_set("status", "No punch")
+			self.db_set("status", "No punch")
 	elif self.in_time and self.out_time:
-		in_time = _parse_attendance_datetime(self.in_time)
-		out_time = _parse_attendance_datetime(self.out_time)
-		punch_hours = round((out_time - in_time).total_seconds() / 3600, 1)
+		hours = _measured_hours(self)
 
-		hours = punch_hours
-		# Approved Personal or Official Short Leave: add actual late-in / early-out gap
-		if has_approved_short_leave(self.employee, self.attendance_date):
-			gap = get_actual_shift_gap_hours(self.shift, self.in_time, self.out_time)
-			if gap:
-				hours = round(punch_hours + gap, 1)
-
-		# Do not exceed full shift length (e.g. late stay after shift end)
-		shift_len = get_shift_duration_hours(self.shift)
-		if shift_len and hours > shift_len:
-			hours = shift_len
-
-		_apply_hours_status(self, hours, self.shift)
+		if day_type:
+			self.db_set("working_hours", hours)
+			self.db_set("status", "Present")
+		else:
+			shift_len = get_shift_duration_hours(self.shift)
+			if shift_len and hours > shift_len:
+				hours = shift_len
+			_apply_hours_status(self, hours, self.shift)
 
 
 def set_short_leave_count(self, method):
@@ -531,11 +627,21 @@ def process_attendance_offdays():
 
     for record in attendance_records:
         try:
-            frappe.call(
-                "valence.api.get_offday_status",
-                employee=record["employee"],
-                attendance_date=record["attendance_date"],
-                attendance=record["name"]
+            resolve_no_punch_status(
+                record["employee"], record["attendance_date"], record["name"]
             )
         except Exception as e:
             frappe.log_error(frappe.get_traceback(), "Attendance Status Update Failed")
+
+
+def resolve_no_punch_status(employee, attendance_date, attendance):
+    from valence.api import get_day_type
+
+    status = get_day_type(employee, attendance_date) or "Absent"
+
+    frappe.db.set_value("Attendance", attendance, {
+        "status": status,
+        "leave_type": None
+    })
+
+    return status

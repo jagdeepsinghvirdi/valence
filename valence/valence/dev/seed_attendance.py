@@ -3,15 +3,15 @@ Valence Attendance Test Data Seeder
 
 Usage from a Frappe bench:
 
-    bench --site valence.localhost execute valence.dev.seed_attendance.run
-    bench --site valence.localhost execute valence.dev.seed_attendance.verify
-    bench --site valence.localhost execute valence.dev.seed_attendance.cleanup
+    bench --site valence.localhost execute valence.valence.dev.seed_attendance.run
+    bench --site valence.localhost execute valence.valence.dev.seed_attendance.verify
+    bench --site valence.localhost execute valence.valence.dev.seed_attendance.cleanup
 """
 
 from __future__ import annotations
 
 import frappe
-from frappe.utils import add_days, add_to_date, getdate
+from frappe.utils import add_days, add_to_date, flt, getdate
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +46,8 @@ HALF_DAY_DATE = add_days(BASE_DATE, 6)    # 2026-09-07 (Monday - working day)
 HOLIDAY_DATE = add_days(BASE_DATE, 11)   # 2026-09-12
 DOUBLE_SHIFT_DATE = add_days(BASE_DATE, 12)  # 2026-09-13
 OD_HALF_DAY_DATE = add_days(BASE_DATE, 13)   # 2026-09-14
+WEEKLY_OFF_NO_PUNCH_DATE = add_days(BASE_DATE, 19)
+HOLIDAY_NO_PUNCH_DATE = add_days(BASE_DATE, 20)
 
 
 # ---------------------------------------------------------------------------
@@ -243,43 +245,31 @@ def create_holiday_list():
         holiday_list.from_date = BASE_DATE
         holiday_list.to_date = add_days(BASE_DATE, 30)
 
-    existing_holiday = next(
-        (
-            row
-            for row in holiday_list.get("holidays", [])
-            if str(row.holiday_date) == str(HOLIDAY_DATE)
-        ),
-        None,
-    )
+    seed_holidays = [
+        (HOLIDAY_DATE, f"{MARKER} Test Holiday", 0),
+        (HOLIDAY_NO_PUNCH_DATE, f"{MARKER} Test Holiday Without Punches", 0),
+        (WEEKLY_OFF_DATE, f"{MARKER} Weekly Off (Sunday)", 1),
+        (WEEKLY_OFF_NO_PUNCH_DATE, f"{MARKER} Weekly Off Without Punches (Sunday)", 1),
+    ]
 
-    if not existing_holiday:
-        holiday_list.append(
-            "holidays",
-            {
-                "holiday_date": HOLIDAY_DATE,
-                "description": f"{MARKER} Test Holiday",
-                "weekly_off": 0,
-            },
+    for holiday_date, description, weekly_off in seed_holidays:
+        existing_row = next(
+            (
+                row
+                for row in holiday_list.get("holidays", [])
+                if str(row.holiday_date) == str(holiday_date)
+            ),
+            None,
         )
-
-    # Also ensure the weekly-off Sunday is marked as weekly off.
-    existing_weekly_off = next(
-        (
-            row
-            for row in holiday_list.get("holidays", [])
-            if str(row.holiday_date) == str(WEEKLY_OFF_DATE) and row.weekly_off
-        ),
-        None,
-    )
-    if not existing_weekly_off:
-        holiday_list.append(
-            "holidays",
-            {
-                "holiday_date": WEEKLY_OFF_DATE,
-                "description": f"{MARKER} Weekly Off (Sunday)",
-                "weekly_off": 1,
-            },
-        )
+        if not existing_row:
+            holiday_list.append(
+                "holidays",
+                {
+                    "holiday_date": holiday_date,
+                    "description": description,
+                    "weekly_off": weekly_off,
+                },
+            )
 
     if holiday_list.is_new():
         holiday_list.insert(ignore_permissions=True)
@@ -463,10 +453,10 @@ def create_shift_types(holiday_list):
         ),
         "double": _get_or_create_shift(
             "double",
-            "09:00:00",
-            "21:00:00",
+            "06:00:00",
+            "14:00:00",
             holiday_list,
-            half_day_threshold=6,
+            half_day_threshold=4,
             absent_threshold=0,
         ),
     }
@@ -657,8 +647,7 @@ def create_attendance(
     in_time=None,
     out_time=None,
     shift=None,
-    half_day=False,
-    half_day_date=None,
+    half_day_status=None,
 ):
     existing = frappe.db.exists(
         "Attendance",
@@ -675,19 +664,16 @@ def create_attendance(
             frappe.db.set_value(
                 "Attendance", existing, "remarks", f"{MARKER} attendance test record", update_modified=False
             )
-        if status and attendance.status != status:
-            frappe.db.set_value("Attendance", existing, "status", status, update_modified=False)
         if in_time and str(attendance.in_time) != str(in_time):
             frappe.db.set_value("Attendance", existing, "in_time", in_time, update_modified=False)
         if out_time and str(attendance.out_time) != str(out_time):
             frappe.db.set_value("Attendance", existing, "out_time", out_time, update_modified=False)
         if shift and attendance.shift != shift:
             frappe.db.set_value("Attendance", existing, "shift", shift, update_modified=False)
-        if half_day:
-            if _has_field("Attendance", "half_day") and not attendance.get("half_day"):
-                frappe.db.set_value("Attendance", existing, "half_day", 1, update_modified=False)
-            if _has_field("Attendance", "half_day_date") and not attendance.get("half_day_date"):
-                frappe.db.set_value("Attendance", existing, "half_day_date", half_day_date or attendance_date, update_modified=False)
+        if half_day_status and _has_field("Attendance", "half_day_status"):
+            frappe.db.set_value(
+                "Attendance", existing, "half_day_status", half_day_status, update_modified=False
+            )
         if attendance.docstatus == 0:
             _submit_if_draft(attendance)
         return attendance.name
@@ -708,21 +694,13 @@ def create_attendance(
     if shift:
         values["shift"] = shift
 
-    if half_day:
-        if _has_field("Attendance", "half_day"):
-            values["half_day"] = 1
-        if _has_field("Attendance", "half_day_date"):
-            values["half_day_date"] = half_day_date or attendance_date
+    if half_day_status and _has_field("Attendance", "half_day_status"):
+        values["half_day_status"] = half_day_status
 
     attendance = frappe.get_doc(values)
     _ensure_field_value(attendance, "remarks", f"{MARKER} attendance test record")
     attendance.insert(ignore_permissions=True)
     _submit_if_draft(attendance)
-
-    # If status was overridden during validate hook (e.g. by set_status doc_event),
-    # ensure the explicit requested test status is preserved.
-    if status and frappe.db.get_value("Attendance", attendance.name, "status") != status:
-        frappe.db.set_value("Attendance", attendance.name, "status", status, update_modified=False)
 
     return attendance.name
 
@@ -967,7 +945,7 @@ def seed_half_day(employee, shift):
     """
     attendance_date = HALF_DAY_DATE
     in_time = add_to_date(attendance_date, hours=9)
-    out_time = add_to_date(attendance_date, hours=13)
+    out_time = add_to_date(attendance_date, hours=12, minutes=30)
 
     create_checkin(employee, in_time, "IN")
     create_checkin(employee, out_time, "OUT")
@@ -979,8 +957,7 @@ def seed_half_day(employee, shift):
         in_time=in_time,
         out_time=out_time,
         shift=shift,
-        half_day=True,
-        half_day_date=attendance_date,
+        half_day_status="Absent",
     )
 
 
@@ -1004,6 +981,24 @@ def seed_weekly_off(employee, shift):
         status="Weekly Off",
         in_time=in_time,
         out_time=out_time,
+        shift=shift,
+    )
+
+
+def seed_weekly_off_no_punch(employee, shift):
+    return create_attendance(
+        employee,
+        WEEKLY_OFF_NO_PUNCH_DATE,
+        status="Weekly Off",
+        shift=shift,
+    )
+
+
+def seed_holiday_no_punch(employee, shift):
+    return create_attendance(
+        employee,
+        HOLIDAY_NO_PUNCH_DATE,
+        status="Holiday",
         shift=shift,
     )
 
@@ -1070,10 +1065,10 @@ def seed_double_shift(employee, shift):
     demonstrate paired-punch double-shift processing. The Attendance record
     spans first_in -> second_out so the full working hours are captured.
     """
-    first_in = add_to_date(DOUBLE_SHIFT_DATE, hours=9)
-    first_out = add_to_date(DOUBLE_SHIFT_DATE, hours=13)
-    second_in = add_to_date(DOUBLE_SHIFT_DATE, hours=14)
-    second_out = add_to_date(DOUBLE_SHIFT_DATE, hours=21)
+    first_in = add_to_date(DOUBLE_SHIFT_DATE, hours=6)
+    first_out = add_to_date(DOUBLE_SHIFT_DATE, hours=14)
+    second_in = add_to_date(DOUBLE_SHIFT_DATE, hours=14, minutes=30)
+    second_out = add_to_date(DOUBLE_SHIFT_DATE, hours=22)
 
     create_checkin(employee, first_in, "IN")
     create_checkin(employee, first_out, "OUT")
@@ -1144,6 +1139,8 @@ def run():
     seed_od_half_day(employees[2])              # OD half-day attendance request via workflow
     seed_holiday(employees[3], shifts["day"])   # Holiday with punches
     seed_double_shift(employees[7], shifts["double"])  # Double shift two punch pairs
+    seed_weekly_off_no_punch(employees[5], shifts["day"])
+    seed_holiday_no_punch(employees[4], shifts["twelve_hour"])
 
     frappe.db.commit()
 
@@ -1316,8 +1313,8 @@ def verify():
             fields.append("out_time")
         if _has_field("Attendance", "working_hours"):
             fields.append("working_hours")
-        if _has_field("Attendance", "half_day"):
-            fields.append("half_day")
+        if _has_field("Attendance", "half_day_status"):
+            fields.append("half_day_status")
 
         att = frappe.db.get_value(
             "Attendance",
@@ -1356,8 +1353,14 @@ def verify():
         ))
         _check(has_in, "Emp06 Weekly Off — IN checkin exists")
         _check(has_out, "Emp06 Weekly Off — OUT checkin exists")
+        _check(
+            flt(att.get("working_hours")) > 0,
+            f"Emp06 Weekly Off — working_hours recorded (got {att.get('working_hours')})",
+        )
 
-    _check_attendance(emp6, WEEKLY_OFF_DATE, "Weekly Off", "Emp06 Weekly Off", _check_weekly_off_punches)
+    _check_attendance(emp6, WEEKLY_OFF_DATE, "Present", "Emp06 Weekly Off worked", _check_weekly_off_punches)
+    _check_attendance(emp6, WEEKLY_OFF_NO_PUNCH_DATE, "Weekly Off", "Emp06 Weekly Off no punches")
+    _check_attendance(emp5, HOLIDAY_NO_PUNCH_DATE, "Holiday", "Emp05 Holiday no punches")
 
     # Half Day — verified via status + punches + schema-aware half_day flag
     def _check_half_day_details(att):
@@ -1368,14 +1371,16 @@ def verify():
         ))
         has_out = bool(frappe.db.get_value(
             "Employee Checkin",
-            {"employee": emp7, "time": add_to_date(HALF_DAY_DATE, hours=13), "log_type": "OUT"},
+            {"employee": emp7, "time": add_to_date(HALF_DAY_DATE, hours=12, minutes=30), "log_type": "OUT"},
             "name",
         ))
         _check(has_in, "Emp07 Half Day — IN checkin (09:00) exists")
-        _check(has_out, "Emp07 Half Day — OUT checkin (13:00) exists")
+        _check(has_out, "Emp07 Half Day — OUT checkin (12:30) exists")
 
-        if _has_field("Attendance", "half_day"):
-            _check(att.get("half_day") == 1, f"Emp07 Half Day — half_day flag=1 (got {att.get('half_day')})")
+        _check(
+            flt(att.get("working_hours")) == 3.5,
+            f"Emp07 Half Day — working_hours=3.5 (got {att.get('working_hours')})",
+        )
 
     _check_attendance(emp7, HALF_DAY_DATE, "Half Day", "Emp07 Half Day", _check_half_day_details)
 
@@ -1393,8 +1398,12 @@ def verify():
         ))
         _check(has_in, "Emp04 Holiday — IN checkin exists")
         _check(has_out, "Emp04 Holiday — OUT checkin exists")
+        _check(
+            flt(att.get("working_hours")) > 0,
+            f"Emp04 Holiday — working_hours recorded (got {att.get('working_hours')})",
+        )
 
-    _check_attendance(emp4, HOLIDAY_DATE, "Holiday", "Emp04 Holiday with punches", _check_holiday_punches)
+    _check_attendance(emp4, HOLIDAY_DATE, "Present", "Emp04 Holiday worked", _check_holiday_punches)
 
     # Double Shift — two punch pairs
     def _check_double_shift_punches(att):
@@ -1410,6 +1419,10 @@ def verify():
         out_count = sum(1 for p in punches if p.log_type == "OUT")
         _check(in_count >= 2, f"Emp08 Double Shift — >=2 IN punches (got {in_count})")
         _check(out_count >= 2, f"Emp08 Double Shift — >=2 OUT punches (got {out_count})")
+        _check(
+            flt(att.get("working_hours")) >= 16,
+            f"Emp08 Double Shift — working_hours>=16 (got {att.get('working_hours')})",
+        )
 
     _check_attendance(emp8, DOUBLE_SHIFT_DATE, "Present", "Emp08 Double Shift", _check_double_shift_punches)
 
@@ -1579,6 +1592,8 @@ def cleanup():
         HALF_DAY_DATE,
         HOLIDAY_DATE,
         DOUBLE_SHIFT_DATE,
+        WEEKLY_OFF_NO_PUNCH_DATE,
+        HOLIDAY_NO_PUNCH_DATE,
     }
 
     # Attendance records auto-created by Leave Applications / Attendance Requests.

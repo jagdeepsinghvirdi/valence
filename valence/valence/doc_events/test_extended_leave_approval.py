@@ -3,7 +3,8 @@ Extended Leave Approval Workflow — acceptance tests from the client PDF.
 
 Covers Leave Application + OD/WFH (Attendance Request):
 - No self-approval (Employee / HOD / Super HOD), even with Leave Approver role
-- Approval follows assigned leave_approver (role alone is not enough)
+- Assigned leave_approver can approve; other-department Leave Approver cannot
+- Same-department Leave Approver (HOD) can approve (Desk Actions)
 - Super HOD with no higher approver → HR
 - No HR → Administrator (DBA)
 - Rules apply to pending docs and mobile API path
@@ -31,6 +32,7 @@ from valence.valence.doc_events.test_leave_workflow_e2e import (
 	HOD_USER,
 	SUPER_HOD_USER,
 	_as_user,
+	_ensure_department,
 	_ensure_employee,
 	_ensure_leave_type_and_allocation,
 	_ensure_test_actors,
@@ -49,6 +51,7 @@ from valence.valence.setup.od_wfh_workflow import ensure_od_wfh_workflow
 
 HR_USER = "e2e.hr@valence.test"
 OTHER_HOD_USER = "e2e.otherhod@valence.test"
+SAME_DEPT_HOD_USER = "e2e.samedept.hod@valence.test"
 
 FROM_OFFSET = 120  # far from OD/WFH e2e dates (0–20) to avoid overlap
 
@@ -70,6 +73,7 @@ def run():
 	actors = _ensure_test_actors()
 	_ensure_user(HR_USER, "E2E", "HR", ["Employee", "HR Manager"])
 	_ensure_user(OTHER_HOD_USER, "E2E", "OtherHOD", ["Employee", "Leave Approver"])
+	_ensure_user(SAME_DEPT_HOD_USER, "E2E", "SameDeptHOD", ["Employee", "Leave Approver"])
 
 	# Wire hierarchy: emp → HOD → Super HOD; HOD's leave goes to Super HOD
 	emp = actors["employee"]["employee"]
@@ -85,6 +89,19 @@ def run():
 	frappe.db.set_value("Employee", hr_emp, "leave_approver", HOD_USER)
 	frappe.db.set_value("Employee", hr_emp, "department", dept)
 	frappe.db.set_value("Employee", hr_emp, "holiday_list", holiday_list)
+
+	# Other-department HOD (Leave Approver role only — must NOT get Actions)
+	other_dept = _ensure_department("E2E Other Dept Ext", company)
+	other_hod_emp = _ensure_employee(
+		"E2E Other Dept HOD", OTHER_HOD_USER, company, holiday_list=holiday_list
+	)
+	frappe.db.set_value("Employee", other_hod_emp, "department", other_dept)
+
+	# Same-department backup HOD (not named leave_approver — must get Actions)
+	same_dept_hod_emp = _ensure_employee(
+		"E2E Same Dept HOD", SAME_DEPT_HOD_USER, company, holiday_list=holiday_list
+	)
+	frappe.db.set_value("Employee", same_dept_hod_emp, "department", dept)
 
 	frappe.db.set_value("Employee", emp, "leave_approver", HOD_USER)
 	frappe.db.set_value("Employee", hod_emp, "leave_approver", SUPER_HOD_USER)
@@ -182,6 +199,31 @@ def run():
 				blocked = True
 				err = str(e)[:180]
 		ok("Other Leave Approver Approve blocked", blocked, err)
+
+		# --- Same-department HOD sees Actions even when not named leave_approver ---
+		same_leave = _new_leave(
+			emp,
+			leave_type,
+			days=1,
+			description="EXT same dept hod",
+			start_offset=FROM_OFFSET + 7,
+		)
+		created.append(same_leave.name)
+		with _as_user(EMP_USER):
+			apply_workflow(frappe.get_doc("Leave Application", same_leave.name), "Apply")
+		with _as_user(SAME_DEPT_HOD_USER):
+			doc = frappe.get_doc("Leave Application", same_leave.name)
+			ok(
+				"Same-department HOD may Approve (Desk Actions fix)",
+				user_may_approve_or_reject(doc, SAME_DEPT_HOD_USER),
+			)
+			apply_workflow(doc, "Approve")
+		same_leave.reload()
+		ok(
+			"Same-department HOD can complete Approve",
+			same_leave.workflow_state == STATE_APPROVED,
+			same_leave.workflow_state,
+		)
 
 		# --- Example 2: HOD cannot approve own leave → Super HOD ---
 		hod_leave = _new_leave(

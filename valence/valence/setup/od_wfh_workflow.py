@@ -197,7 +197,15 @@ def _ensure_workflow():
 			_transition(STATE_DRAFT, "Apply", STATE_PENDING_HOD, role, allow_self_approval=1)
 		)
 
-	for role in ("Leave Approver", "Super HOD", "HR Manager", "HR User", "Administrator"):
+	# Same as Leave: wide roles + approval_hierarchy filter (assigned / dept HOD / HR)
+	for role in (
+		"Leave Approver",
+		"Employee",
+		"Super HOD",
+		"HR Manager",
+		"HR User",
+		"Administrator",
+	):
 		transitions.append(
 			_transition(
 				STATE_PENDING_HOD,

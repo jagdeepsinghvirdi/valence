@@ -14,8 +14,16 @@ from frappe.utils import (
 
 class WorkOrder(_WorkOrder):
 	def get_status(self, status=None):
-		"""Return the status based on stock entries against this work order"""
-		under_production = flt(frappe.db.get_single_value("Manufacturing Settings", "under_production_allowance_percentage"))
+		"""Return the status based on stock entries against this work order.
+
+		Align with ERPNext: In Process when header mt > 0, skip_transfer, or any
+		pick-list material transfer (has_transferred_material), even if min-fraction
+		keeps material_transferred_for_manufacturing at 0.
+		Keeps under-production allowance for Completed (Finbyz).
+		"""
+		under_production = flt(
+			frappe.db.get_single_value("Manufacturing Settings", "under_production_allowance_percentage")
+		)
 
 		if not status:
 			status = self.status
@@ -23,14 +31,19 @@ class WorkOrder(_WorkOrder):
 		if self.docstatus == 0:
 			status = "Draft"
 		elif self.docstatus == 1:
-			if status != "Stopped":
+			if status not in ("Closed", "Stopped"):
 				status = "Not Started"
-				if flt(self.material_transferred_for_manufacturing) > 0:
+				if (
+					flt(self.material_transferred_for_manufacturing) > 0
+					or self.skip_transfer
+					or self.has_transferred_material()
+				):
 					status = "In Process"
 
 				total_qty = flt(self.produced_qty) + flt(self.process_loss_qty)
-				allowed_qty = flt(self.qty) * (100 - under_production) / 100.0 # Finbyz Changes to allow under production
-				
+				# Finbyz: allow under-production before marking Completed
+				allowed_qty = flt(self.qty) * (100 - under_production) / 100.0
+
 				if flt(total_qty) >= allowed_qty:
 					status = "Completed"
 		else:

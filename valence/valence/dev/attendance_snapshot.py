@@ -1,33 +1,10 @@
-"""
-Valence Attendance Snapshot and Diff Utility.
-
-This utility provides deterministic, read-only snapshotting of Attendance,
-Employee Checkin, Holiday List, and Shift Assignment records from the database
-into an external JSON file, along with a deterministic field-level diff engine.
-
-Strict Constraints:
-- Completely read-only with respect to the database.
-- Zero INSERT / UPDATE / DELETE operations.
-- Snapshot files must be saved outside the repository directory.
-
-Usage from bench:
-    # 1. Capture snapshot:
-    bench --site valence.localhost execute valence.dev.attendance_snapshot.capture --kwargs '{"from_date": "2026-09-01", "to_date": "2026-09-15", "employee": "VALENCE_ATTENDANCE_SEED-01", "output_path": "/tmp/snapshot_a.json"}'
-
-    # 2. Diff two snapshots:
-    bench --site valence.localhost execute valence.dev.attendance_snapshot.diff --kwargs '{"file_a": "/tmp/snapshot_a.json", "file_b": "/tmp/snapshot_b.json"}'
-
-    # 3. Run non-mutating pure in-memory tests:
-    bench --site valence.localhost execute valence.dev.attendance_snapshot.run_pure_diff_tests
-"""
-
 from __future__ import annotations
 
 import json
 import os
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -35,22 +12,11 @@ import frappe
 from frappe.utils import add_days, flt, get_datetime, getdate
 
 
-# ---------------------------------------------------------------------------
-# Repository Path Security
-# ---------------------------------------------------------------------------
-
-
 def get_repo_root() -> Path:
-    """Resolve repository root directory from file location."""
     return Path(__file__).resolve().parents[3]
 
 
 def validate_output_path(output_path: str) -> Path:
-    """
-    Validate that the specified output path is outside the git repository.
-
-    Raises ValueError if output_path is inside or equal to the repository root.
-    """
     repo_root = get_repo_root().resolve()
     resolved_out = Path(output_path).resolve()
 
@@ -68,11 +34,6 @@ def validate_output_path(output_path: str) -> Path:
         )
 
     return resolved_out
-
-
-# ---------------------------------------------------------------------------
-# Normalization & Formatting Helpers
-# ---------------------------------------------------------------------------
 
 
 def _to_iso_date(val: Any) -> Optional[str]:
@@ -127,6 +88,26 @@ def _to_int_or_none(val: Any) -> Optional[int]:
         return None
 
 
+def _as_timedelta(value: Any) -> Optional[timedelta]:
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return value
+    if hasattr(value, "hour"):
+        return timedelta(hours=value.hour, minutes=value.minute, seconds=getattr(value, "second", 0) or 0)
+    if isinstance(value, str):
+        parts = value.strip().split(":")
+        if len(parts) >= 2:
+            try:
+                h = int(parts[0])
+                m = int(parts[1])
+                s = int(parts[2]) if len(parts) > 2 else 0
+                return timedelta(hours=h, minutes=m, seconds=s)
+            except Exception:
+                return None
+    return None
+
+
 def _get_company_default_holiday_list() -> Optional[str]:
     company = frappe.db.get_single_value("Global Defaults", "default_company")
     if not company:
@@ -136,19 +117,86 @@ def _get_company_default_holiday_list() -> Optional[str]:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Data Extraction (Read-Only DB Queries)
-# ---------------------------------------------------------------------------
+def _get_applicable_shift_assignment(employee: str, date_str: str) -> Optional[Dict[str, Any]]:
+    if not employee or not date_str:
+        return None
+
+    has_custom_off_day = frappe.get_meta("Shift Assignment").has_field("custom_off_day")
+    has_status = frappe.get_meta("Shift Assignment").has_field("status")
+
+    fields = [
+        "name",
+        "employee",
+        "employee_name",
+        "shift_type",
+        "start_date",
+        "end_date",
+        "company",
+        "department",
+        "docstatus",
+    ]
+    if has_custom_off_day:
+        fields.append("custom_off_day")
+    if has_status:
+        fields.append("status")
+
+    filters: List[Any] = [
+        ["employee", "=", employee],
+        ["start_date", "<=", date_str],
+        ["docstatus", "=", 1],
+    ]
+    if has_status:
+        filters.append(["status", "=", "Active"])
+
+    or_filters = [
+        ["end_date", ">=", date_str],
+        ["end_date", "is", "not set"],
+    ]
+
+    assignments = frappe.get_all(
+        "Shift Assignment",
+        filters=filters,
+        or_filters=or_filters,
+        fields=fields,
+        order_by="start_date desc, creation desc, name desc",
+        limit_page_length=1,
+    )
+
+    if not assignments:
+        return None
+
+    row = assignments[0]
+    return {
+        "name": row.get("name"),
+        "employee": row.get("employee"),
+        "employee_name": row.get("employee_name"),
+        "shift_type": row.get("shift_type"),
+        "start_date": _to_iso_date(row.get("start_date")),
+        "end_date": _to_iso_date(row.get("end_date")),
+        "custom_off_day": row.get("custom_off_day"),
+        "status": row.get("status") if has_status else "Active",
+        "company": row.get("company"),
+        "department": row.get("department"),
+        "docstatus": _to_int_or_none(row.get("docstatus")),
+    }
+
+
+def _is_overnight_shift(shift_type: Optional[str]) -> bool:
+    if not shift_type or not frappe.db.exists("Shift Type", shift_type):
+        return False
+    times = frappe.db.get_value("Shift Type", shift_type, ["start_time", "end_time"], as_dict=True)
+    if not times or times.get("start_time") is None or times.get("end_time") is None:
+        return False
+    st = _as_timedelta(times["start_time"])
+    et = _as_timedelta(times["end_time"])
+    if not st or not et:
+        return False
+    return st > et
 
 
 def fetch_attendance_records(
     from_date: str, to_date: str, employee: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch Attendance records matching date range and optional employee filter.
-
-    Includes docstatus in (0, 1, 2) to capture draft, submitted, and cancelled records.
-    """
     filters: Dict[str, Any] = {
         "attendance_date": ["between", [from_date, to_date]],
         "docstatus": ["in", [0, 1, 2]],
@@ -156,7 +204,6 @@ def fetch_attendance_records(
     if employee:
         filters["employee"] = employee
 
-    # Check custom fields dynamically
     has_short_leave_type = frappe.get_meta("Attendance").has_field("custom_short_leave_type")
     has_short_leave_count = frappe.get_meta("Attendance").has_field("custom_short_leave_count")
     has_half_day_status = frappe.get_meta("Attendance").has_field("half_day_status")
@@ -217,7 +264,6 @@ def fetch_attendance_records(
         }
         normalized.append(rec)
 
-    # Deterministic sorting: employee, attendance_date, name
     normalized.sort(
         key=lambda x: (
             x.get("employee") or "",
@@ -231,11 +277,8 @@ def fetch_attendance_records(
 def fetch_employee_checkins(
     from_date: str, to_date: str, employee: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch Employee Checkin records in the half-open interval [from_date 00:00:00, to_date + 1 00:00:00).
-    """
     start_dt = f"{from_date} 00:00:00"
-    end_dt = f"{add_days(to_date, 1)} 00:00:00"
+    end_dt = f"{add_days(to_date, 2)} 00:00:00"
 
     filters: List[Any] = [
         ["time", ">=", start_dt],
@@ -245,7 +288,6 @@ def fetch_employee_checkins(
     if employee:
         filters.append(["employee", "=", employee])
 
-    # Half-open condition: time < end_dt
     fields = [
         "name",
         "employee",
@@ -264,8 +306,18 @@ def fetch_employee_checkins(
     normalized = []
     for row in raw_records:
         t_str = _to_iso_datetime(row.get("time"))
-        if not t_str or t_str >= end_dt:
+        if not t_str:
             continue
+
+        punch_date = t_str[:10]
+        if punch_date > to_date:
+            emp = row.get("employee")
+            sa_prev = _get_applicable_shift_assignment(emp, to_date)
+            shift_type = row.get("shift") or (sa_prev.get("shift_type") if sa_prev else None)
+            if not _is_overnight_shift(shift_type):
+                continue
+            if t_str >= f"{add_days(to_date, 1)} 14:00:00":
+                continue
 
         rec = {
             "name": row.get("name"),
@@ -281,7 +333,6 @@ def fetch_employee_checkins(
         }
         normalized.append(rec)
 
-    # Deterministic sorting: employee, time, name
     normalized.sort(
         key=lambda x: (
             x.get("employee") or "",
@@ -298,13 +349,6 @@ def fetch_holiday_lists(
     employee: Optional[str] = None,
     discovered_employees: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch Holiday List definitions and child holidays in range [from_date, to_date].
-
-    - If employee filter given: resolves employee's holiday list (or company default).
-    - If no employee filter: resolves holiday lists for all discovered employees.
-    - Handles holiday list with no holidays in range by returning header with holidays: [].
-    """
     target_employees: Set[str] = set()
     if employee:
         target_employees.add(employee)
@@ -338,7 +382,6 @@ def fetch_holiday_lists(
         if not hl_data:
             continue
 
-        # Fetch child holidays within requested date range
         child_holidays_raw = frappe.get_all(
             "Holiday",
             filters={
@@ -359,7 +402,6 @@ def fetch_holiday_lists(
                 }
             )
 
-        # Sort child holidays deterministically by holiday_date, name
         child_holidays.sort(
             key=lambda x: (str(x.get("holiday_date") or ""), x.get("name") or "")
         )
@@ -382,26 +424,17 @@ def fetch_holiday_lists(
 def fetch_shift_assignments(
     from_date: str, to_date: str, employee: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch active Shift Assignments overlapping the date range [from_date, to_date].
-
-    Active assignment requirements:
-    - docstatus = 1 (Submitted)
-    - start_date <= to_date
-    - (end_date >= from_date OR end_date is null/empty)
-    - status = 'Active' (if status field exists)
-    """
     has_custom_off_day = frappe.get_meta("Shift Assignment").has_field("custom_off_day")
     has_status = frappe.get_meta("Shift Assignment").has_field("status")
 
-    filters: Dict[str, Any] = {
-        "docstatus": 1,
-        "start_date": ["<=", to_date],
-    }
+    filters: List[Any] = [
+        ["docstatus", "=", 1],
+        ["start_date", "<=", to_date],
+    ]
     if employee:
-        filters["employee"] = employee
+        filters.append(["employee", "=", employee])
     if has_status:
-        filters["status"] = "Active"
+        filters.append(["status", "=", "Active"])
 
     or_filters = [
         ["end_date", ">=", from_date],
@@ -429,6 +462,7 @@ def fetch_shift_assignments(
         filters=filters,
         or_filters=or_filters,
         fields=fields,
+        order_by="employee asc, start_date desc, creation desc, name desc",
     )
 
     normalized = []
@@ -448,7 +482,6 @@ def fetch_shift_assignments(
         }
         normalized.append(rec)
 
-    # Deterministic sorting: employee, start_date, name
     normalized.sort(
         key=lambda x: (
             x.get("employee") or "",
@@ -459,15 +492,114 @@ def fetch_shift_assignments(
     return normalized
 
 
-# ---------------------------------------------------------------------------
-# Snapshot Capture Pipeline
-# ---------------------------------------------------------------------------
+def build_checkin_summaries(
+    from_date: str,
+    to_date: str,
+    employee: Optional[str] = None,
+    attendance_records: Optional[List[Dict[str, Any]]] = None,
+    checkins: Optional[List[Dict[str, Any]]] = None,
+    shift_assignments: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    target_employees: Set[str] = set()
+    if employee:
+        target_employees.add(employee)
+    else:
+        if attendance_records:
+            for row in attendance_records:
+                if row.get("employee"):
+                    target_employees.add(row["employee"])
+        if checkins:
+            for row in checkins:
+                if row.get("employee"):
+                    target_employees.add(row["employee"])
+        if shift_assignments:
+            for row in shift_assignments:
+                if row.get("employee"):
+                    target_employees.add(row["employee"])
+
+    if not target_employees:
+        return []
+
+    company_default_hl = _get_company_default_holiday_list()
+
+    emp_checkins_map: Dict[str, List[Dict[str, Any]]] = {emp: [] for emp in target_employees}
+    if checkins:
+        for chk in checkins:
+            emp = chk.get("employee")
+            if emp in emp_checkins_map:
+                emp_checkins_map[emp].append(chk)
+
+    for emp in emp_checkins_map:
+        emp_checkins_map[emp].sort(key=lambda x: str(x.get("time") or ""))
+
+    summaries: List[Dict[str, Any]] = []
+
+    start_d = getdate(from_date)
+    end_d = getdate(to_date)
+
+    for emp in sorted(target_employees):
+        emp_hl = frappe.db.get_value("Employee", emp, "holiday_list") or company_default_hl
+
+        curr_d = start_d
+        while curr_d <= end_d:
+            date_str = curr_d.strftime("%Y-%m-%d")
+            next_date_str = add_days(date_str, 1)
+
+            sa = _get_applicable_shift_assignment(emp, date_str)
+            custom_off_day = sa.get("custom_off_day") if sa else None
+            shift_type = sa.get("shift_type") if sa else None
+            is_overnight = _is_overnight_shift(shift_type)
+
+            if is_overnight:
+                w_start = f"{date_str} 00:00:00"
+                w_end = f"{next_date_str} 14:00:00"
+            else:
+                w_start = f"{date_str} 00:00:00"
+                w_end = f"{next_date_str} 00:00:00"
+
+            matching_punches = []
+            for chk in emp_checkins_map.get(emp, []):
+                t_val = str(chk.get("time") or "")
+                if not t_val:
+                    continue
+                if is_overnight:
+                    if w_start <= t_val < w_end:
+                        matching_punches.append(t_val)
+                else:
+                    if w_start <= t_val < w_end:
+                        matching_punches.append(t_val)
+
+            count = len(matching_punches)
+            earliest_punch = min(matching_punches) if matching_punches else None
+            latest_punch = max(matching_punches) if matching_punches else None
+
+            summary_item = {
+                "name": f"{emp}::{date_str}",
+                "employee": emp,
+                "date": date_str,
+                "count": count,
+                "earliest_punch": earliest_punch,
+                "latest_punch": latest_punch,
+                "holiday_list": emp_hl,
+                "custom_off_day": custom_off_day,
+            }
+            summaries.append(summary_item)
+
+            curr_d = add_days(curr_d, 1)
+
+    summaries.sort(
+        key=lambda x: (
+            x.get("employee") or "",
+            str(x.get("date") or ""),
+            x.get("name") or "",
+        )
+    )
+    return summaries
 
 
 def generate_snapshot_data(
     from_date: str, to_date: str, employee: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Generate normalized in-memory snapshot dictionary."""
     from_date_iso = _to_iso_date(from_date)
     to_date_iso = _to_iso_date(to_date)
     if not from_date_iso or not to_date_iso:
@@ -477,7 +609,6 @@ def generate_snapshot_data(
     checkins = fetch_employee_checkins(from_date_iso, to_date_iso, employee)
     shift_assignments = fetch_shift_assignments(from_date_iso, to_date_iso, employee)
 
-    # Discover employees present in attendance, checkins, or shifts
     discovered_employees: Set[str] = set()
     for row in attendance:
         if row.get("employee"):
@@ -492,41 +623,45 @@ def generate_snapshot_data(
     holiday_lists = fetch_holiday_lists(
         from_date_iso, to_date_iso, employee, discovered_employees
     )
+    checkin_summaries = build_checkin_summaries(
+        from_date_iso,
+        to_date_iso,
+        employee,
+        attendance_records=attendance,
+        checkins=checkins,
+        shift_assignments=shift_assignments,
+    )
 
-    snapshot = {
+    snapshot_data = {
         "metadata": {
             "version": "1.0",
-            "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "from_date": from_date_iso,
             "to_date": to_date_iso,
             "employee": employee,
             "counts": {
                 "attendance": len(attendance),
                 "employee_checkins": len(checkins),
+                "checkin_summaries": len(checkin_summaries),
                 "holiday_lists": len(holiday_lists),
                 "shift_assignments": len(shift_assignments),
             },
         },
         "attendance": attendance,
         "employee_checkins": checkins,
+        "checkin_summaries": checkin_summaries,
         "holiday_lists": holiday_lists,
         "shift_assignments": shift_assignments,
     }
-    return snapshot
+    return snapshot_data
 
 
-def capture(
+def snapshot(
     from_date: str,
     to_date: str,
     employee: Optional[str] = None,
     output_path: Optional[str] = None,
     pretty: bool = True,
 ) -> str:
-    """
-    Capture snapshot to an external JSON file.
-
-    Returns the absolute path of the generated JSON file.
-    """
     if not output_path:
         ts = int(time.time())
         emp_tag = f"_{employee}" if employee else ""
@@ -536,32 +671,25 @@ def capture(
     validated_path = validate_output_path(output_path)
     validated_path.parent.mkdir(parents=True, exist_ok=True)
 
-    snapshot = generate_snapshot_data(from_date, to_date, employee)
+    data = generate_snapshot_data(from_date, to_date, employee)
 
     indent = 2 if pretty else None
-    json_content = json.dumps(snapshot, indent=indent, sort_keys=True, default=str)
+    json_content = json.dumps(data, indent=indent, sort_keys=True, default=str)
 
     with open(validated_path, "w", encoding="utf-8") as f:
         f.write(json_content)
 
     print(f"Attendance snapshot successfully written to: {validated_path}")
-    print(f"Record summary: {snapshot['metadata']['counts']}")
+    print(f"Record summary: {data['metadata']['counts']}")
     return str(validated_path)
 
 
-# ---------------------------------------------------------------------------
-# Diff Engine
-# ---------------------------------------------------------------------------
+capture = snapshot
 
 
 def _build_identity_map(
     records: List[Dict[str, Any]], doctype_name: str, identity_field: str, snapshot_label: str
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    Build a mapping of identity_field -> record.
-
-    Explicitly detects duplicate identity values in records and raises ValueError.
-    """
     id_map: Dict[str, Dict[str, Any]] = {}
     seen_keys: Set[str] = set()
     duplicates: Set[str] = set()
@@ -592,9 +720,6 @@ def _diff_records(
     identity_field: str = "name",
     child_diff_field: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Diff two lists of normalized records by identity_field.
-    """
     map_a = _build_identity_map(list_a, doctype_name, identity_field, "Snapshot A")
     map_b = _build_identity_map(list_b, doctype_name, identity_field, "Snapshot B")
 
@@ -647,6 +772,8 @@ def _diff_records(
                 changed_entry["employee"] = row_b.get("employee") or row_a.get("employee")
             if "attendance_date" in row_b or "attendance_date" in row_a:
                 changed_entry["attendance_date"] = row_b.get("attendance_date") or row_a.get("attendance_date")
+            if "date" in row_b or "date" in row_a:
+                changed_entry["date"] = row_b.get("date") or row_a.get("date")
 
             changed.append(changed_entry)
         else:
@@ -662,11 +789,6 @@ def _diff_records(
 
 
 def compare_snapshots(data_a: Dict[str, Any], data_b: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compare two snapshot dictionaries.
-
-    Excludes volatile metadata (generated_at) to ensure deterministic zero-diff invariants.
-    """
     att_diff = _diff_records(
         data_a.get("attendance", []),
         data_b.get("attendance", []),
@@ -676,6 +798,11 @@ def compare_snapshots(data_a: Dict[str, Any], data_b: Dict[str, Any]) -> Dict[st
         data_a.get("employee_checkins", []),
         data_b.get("employee_checkins", []),
         "Employee Checkin",
+    )
+    summary_diff = _diff_records(
+        data_a.get("checkin_summaries", []),
+        data_b.get("checkin_summaries", []),
+        "Checkin Summary",
     )
     hl_diff = _diff_records(
         data_a.get("holiday_lists", []),
@@ -692,18 +819,21 @@ def compare_snapshots(data_a: Dict[str, Any], data_b: Dict[str, Any]) -> Dict[st
     total_added = (
         len(att_diff["added"])
         + len(checkin_diff["added"])
+        + len(summary_diff["added"])
         + len(hl_diff["added"])
         + len(shift_diff["added"])
     )
     total_removed = (
         len(att_diff["removed"])
         + len(checkin_diff["removed"])
+        + len(summary_diff["removed"])
         + len(hl_diff["removed"])
         + len(shift_diff["removed"])
     )
     total_changed = (
         len(att_diff["changed"])
         + len(checkin_diff["changed"])
+        + len(summary_diff["changed"])
         + len(hl_diff["changed"])
         + len(shift_diff["changed"])
     )
@@ -724,6 +854,12 @@ def compare_snapshots(data_a: Dict[str, Any], data_b: Dict[str, Any]) -> Dict[st
                 "changed": len(checkin_diff["changed"]),
                 "unchanged": checkin_diff["unchanged_count"],
             },
+            "Checkin Summary": {
+                "added": len(summary_diff["added"]),
+                "removed": len(summary_diff["removed"]),
+                "changed": len(summary_diff["changed"]),
+                "unchanged": summary_diff["unchanged_count"],
+            },
             "Holiday List": {
                 "added": len(hl_diff["added"]),
                 "removed": len(hl_diff["removed"]),
@@ -740,6 +876,7 @@ def compare_snapshots(data_a: Dict[str, Any], data_b: Dict[str, Any]) -> Dict[st
         "details": {
             "attendance": att_diff,
             "employee_checkins": checkin_diff,
+            "checkin_summaries": summary_diff,
             "holiday_lists": hl_diff,
             "shift_assignments": shift_diff,
         },
@@ -747,7 +884,6 @@ def compare_snapshots(data_a: Dict[str, Any], data_b: Dict[str, Any]) -> Dict[st
 
 
 def format_diff_report(diff_result: Dict[str, Any]) -> str:
-    """Format diff result as a readable terminal report."""
     lines: List[str] = []
     lines.append("=" * 68)
     lines.append("ATTENDANCE SNAPSHOT DIFF REPORT")
@@ -758,6 +894,7 @@ def format_diff_report(diff_result: Dict[str, Any]) -> str:
     for section_key, title in [
         ("attendance", "ATTENDANCE"),
         ("employee_checkins", "EMPLOYEE CHECKIN"),
+        ("checkin_summaries", "CHECKIN SUMMARY"),
         ("holiday_lists", "HOLIDAY LIST"),
         ("shift_assignments", "SHIFT ASSIGNMENT"),
     ]:
@@ -799,7 +936,6 @@ def format_diff_report(diff_result: Dict[str, Any]) -> str:
                         new_v = diff_vals.get("new")
                         lines.append(f"          - {fld}: {old_v!r} -> {new_v!r}")
 
-    # Summary table
     lines.append("\n" + "=" * 68)
     lines.append("SUMMARY TABLE")
     lines.append("=" * 68)
@@ -820,11 +956,6 @@ def format_diff_report(diff_result: Dict[str, Any]) -> str:
 
 
 def diff(file_a: str, file_b: str, output_format: str = "text") -> Dict[str, Any]:
-    """
-    Diff two snapshot JSON files.
-
-    Prints formatted report and returns diff summary dictionary.
-    """
     path_a = Path(file_a).resolve()
     path_b = Path(file_b).resolve()
 
@@ -849,17 +980,7 @@ def diff(file_a: str, file_b: str, output_format: str = "text") -> Dict[str, Any
     return diff_result
 
 
-# ---------------------------------------------------------------------------
-# Pure In-Memory Non-Mutating Tests
-# ---------------------------------------------------------------------------
-
-
 def run_pure_diff_tests() -> bool:
-    """
-    Run non-mutating in-memory tests to verify diffing logic, sorting, and security.
-
-    Zero database writes or mutations occur during these tests.
-    """
     results: List[Tuple[str, str, str]] = []
 
     def ok(name: str, cond: bool, detail: str = "") -> None:
@@ -869,7 +990,6 @@ def run_pure_diff_tests() -> bool:
 
     print("\n--- Running Pure In-Memory Diff Tests ---")
 
-    # 1. Output Path Security
     repo_root = get_repo_root()
     inside_path = os.path.join(str(repo_root), "valence", "test_out.json")
     threw = False
@@ -883,19 +1003,17 @@ def run_pure_diff_tests() -> bool:
     try:
         validated = validate_output_path(outside_path)
         valid_ok = str(validated) == str(Path(outside_path).resolve())
-    except Exception as e:
+    except Exception:
         valid_ok = False
     ok("Path Security: Allows external output path", valid_ok, f"Path: {outside_path}")
 
-    # 2. Identical snapshots produce 0 diffs even with different generated_at
     mock_base = {
         "metadata": {
             "version": "1.0",
-            "generated_at": "2026-09-01T10:00:00",
             "from_date": "2026-09-01",
             "to_date": "2026-09-05",
             "employee": "EMP-01",
-            "counts": {"attendance": 1, "employee_checkins": 1, "holiday_lists": 1, "shift_assignments": 1},
+            "counts": {"attendance": 1, "employee_checkins": 1, "checkin_summaries": 1, "holiday_lists": 1, "shift_assignments": 1},
         },
         "attendance": [
             {
@@ -936,6 +1054,18 @@ def run_pure_diff_tests() -> bool:
                 "docstatus": 0,
             }
         ],
+        "checkin_summaries": [
+            {
+                "name": "EMP-01::2026-09-01",
+                "employee": "EMP-01",
+                "date": "2026-09-01",
+                "count": 2,
+                "earliest_punch": "2026-09-01 09:00:00",
+                "latest_punch": "2026-09-01 17:30:00",
+                "holiday_list": "Standard HL",
+                "custom_off_day": "Sunday",
+            }
+        ],
         "holiday_lists": [
             {
                 "name": "HL-01",
@@ -972,16 +1102,13 @@ def run_pure_diff_tests() -> bool:
     }
 
     mock_copy = json.loads(json.dumps(mock_base))
-    mock_copy["metadata"]["generated_at"] = "2026-09-01T12:00:00"  # Different timestamp
-
     diff_zero = compare_snapshots(mock_base, mock_copy)
-    ok("Zero Diff Invariant: Identical data with different generated_at gives 0 diffs", diff_zero["total_differences"] == 0)
+    ok("Zero Diff Invariant: Identical data gives 0 diffs", diff_zero["total_differences"] == 0)
 
-    # 3. Field modification detection
     mock_modified = json.loads(json.dumps(mock_base))
     mock_modified["attendance"][0]["working_hours"] = 4.0
     mock_modified["attendance"][0]["status"] = "Half Day"
-    mock_modified["attendance"][0]["docstatus"] = 2  # Cancelled
+    mock_modified["attendance"][0]["docstatus"] = 2
 
     diff_mod = compare_snapshots(mock_base, mock_modified)
     ok("Field Diff: Detects field-level changes", diff_mod["total_differences"] == 1)
@@ -990,7 +1117,15 @@ def run_pure_diff_tests() -> bool:
     ok("Field Diff: Captures status change", att_changes.get("status") == {"old": "Present", "new": "Half Day"})
     ok("Field Diff: Captures docstatus change (cancelled)", att_changes.get("docstatus") == {"old": 1, "new": 2})
 
-    # 4. Added and Removed record detection
+    mock_sum_mod = json.loads(json.dumps(mock_base))
+    mock_sum_mod["checkin_summaries"][0]["count"] = 4
+    mock_sum_mod["checkin_summaries"][0]["latest_punch"] = "2026-09-01 21:00:00"
+    diff_sum = compare_snapshots(mock_base, mock_sum_mod)
+    ok("Summary Diff: Detects checkin summary modification", diff_sum["total_differences"] == 1)
+    sum_changes = diff_sum["details"]["checkin_summaries"]["changed"][0]["changes"]
+    ok("Summary Diff: Captures count change", sum_changes.get("count") == {"old": 2, "new": 4})
+    ok("Summary Diff: Captures latest punch change", sum_changes.get("latest_punch") == {"old": "2026-09-01 17:30:00", "new": "2026-09-01 21:00:00"})
+
     mock_added = json.loads(json.dumps(mock_base))
     mock_added["attendance"].append(
         {
@@ -1023,27 +1158,25 @@ def run_pure_diff_tests() -> bool:
     diff_rem = compare_snapshots(mock_added, mock_base)
     ok("Removal Diff: Detects removed attendance record", len(diff_rem["details"]["attendance"]["removed"]) == 1)
 
-    # 5. Empty snapshot handling
     empty_snap = {
         "metadata": {
             "version": "1.0",
-            "generated_at": "2026-09-01T10:00:00",
             "from_date": "2026-09-01",
             "to_date": "2026-09-05",
             "employee": None,
-            "counts": {"attendance": 0, "employee_checkins": 0, "holiday_lists": 0, "shift_assignments": 0},
+            "counts": {"attendance": 0, "employee_checkins": 0, "checkin_summaries": 0, "holiday_lists": 0, "shift_assignments": 0},
         },
         "attendance": [],
         "employee_checkins": [],
+        "checkin_summaries": [],
         "holiday_lists": [],
         "shift_assignments": [],
     }
     diff_empty = compare_snapshots(empty_snap, empty_snap)
     ok("Empty Data: Comparing empty snapshots gives 0 diffs", diff_empty["total_differences"] == 0)
 
-    # 6. Duplicate record identity detection
     mock_dup = json.loads(json.dumps(mock_base))
-    mock_dup["attendance"].append(json.loads(json.dumps(mock_base["attendance"][0])))  # Duplicate HR-ATT-001
+    mock_dup["attendance"].append(json.loads(json.dumps(mock_base["attendance"][0])))
     dup_threw = False
     dup_err = ""
     try:
@@ -1053,7 +1186,6 @@ def run_pure_diff_tests() -> bool:
         dup_err = str(e)
     ok("Duplicate Detection: Rejects snapshot with duplicate record identity", dup_threw, dup_err[:80])
 
-    # Summary
     all_passed = all(st == "PASS" for st, _, _ in results)
     print(f"\nPure Diff Tests Result: {'ALL PASS' if all_passed else 'FAILURES DETECTED'}")
     return all_passed

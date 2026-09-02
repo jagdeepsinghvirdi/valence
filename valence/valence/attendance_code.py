@@ -14,6 +14,7 @@ DOUBLE_HALF_FACTOR = 1.5
 
 LEAVE_CODES = {
 	"earned leave": "EL",
+	"privilege leave": "PL",
 	"casual leave": "CL",
 	"sick leave": "SL",
 	"leave without pay": "L",
@@ -150,6 +151,9 @@ def _half_day_code(doc, context):
 			return _ordered(PRESENT_CODE, leave_code, worked_half)
 		return "{0}/{1}".format(leave_code, ABSENT_CODE)
 
+	if _request_reason(doc, context) == ON_DUTY_STATUS:
+		return _ordered(PRESENT_CODE, ON_DUTY_CODE, worked_half)
+
 	return _ordered(PRESENT_CODE, ABSENT_CODE, worked_half)
 
 
@@ -157,6 +161,19 @@ def _ordered(worked_token, other_token, worked_half):
 	if worked_half == "Second Half":
 		return "{0}/{1}".format(other_token, worked_token)
 	return "{0}/{1}".format(worked_token, other_token)
+
+
+def _request_reason(doc, context):
+	if "request_reason" in context:
+		return context.get("request_reason")
+
+	request = doc.get("attendance_request")
+	if not request:
+		return None
+
+	import frappe
+
+	return frappe.db.get_value("Attendance Request", request, "reason")
 
 
 def _worked_other_half(doc):

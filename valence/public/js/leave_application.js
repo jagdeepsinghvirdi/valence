@@ -1,6 +1,42 @@
 frappe.ui.form.on("Leave Application", {
 	refresh(frm) {
 		frm.trigger("restrict_leave_types_for_resign");
+		frm.trigger("show_direct_apply_action");
+	},
+
+	show_direct_apply_action(frm) {
+		if (!frm.is_new()) {
+			if (frm.save_disabled) {
+				frm.enable_save();
+			}
+			return;
+		}
+
+		frm.disable_save();
+		frm.page.set_primary_action(__("Apply"), () => {
+			frm.enable_save();
+			frappe.dom.freeze();
+
+			frm.save()
+				.then(() => frm.script_manager.trigger("before_workflow_action"))
+				.then(() =>
+					frappe.xcall("frappe.model.workflow.apply_workflow", {
+						doc: frm.doc,
+						action: "Apply",
+					})
+				)
+				.then((doc) => {
+					frappe.model.sync(doc);
+					frm.refresh();
+					frm.script_manager.trigger("after_workflow_action");
+				})
+				.catch(() => {
+					frm.refresh();
+				})
+				.finally(() => {
+					frappe.dom.unfreeze();
+				});
+		});
 	},
 
 	employee(frm) {

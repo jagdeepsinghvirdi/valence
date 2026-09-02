@@ -31,7 +31,9 @@ CASES = [
     ("Half day", "CL with half_day_status Absent overrides punches", {"status": "Half Day", "leave_type": "Casual Leave", "half_day_status": "Absent", "in_time": IN_TIME, "out_time": OUT_TIME}, {"worked_half": "First Half"}, "CL/A"),
     ("Half day", "LWP half day with punches, worked first", {"status": "Half Day", "leave_type": "Leave Without Pay", "in_time": IN_TIME, "out_time": OUT_TIME}, {"worked_half": "First Half"}, "P/L"),
     ("Half day", "LWP half day with no punches", {"status": "Half Day", "leave_type": "Leave Without Pay"}, {}, "L/A"),
-    ("Half day", "On Duty half day", {"status": "Half Day", "attendance_request": "AR-0001", "in_time": IN_TIME, "out_time": OUT_TIME}, {"worked_half": "First Half"}, "P/TT"),
+    ("Half day", "On Duty half day", {"status": "Half Day", "attendance_request": "AR-0001", "in_time": IN_TIME, "out_time": OUT_TIME}, {"worked_half": "First Half", "request_reason": "On Duty"}, "P/TT"),
+    ("Half day", "On Duty half day worked second half", {"status": "Half Day", "attendance_request": "AR-0002", "in_time": IN_TIME, "out_time": OUT_TIME}, {"worked_half": "Second Half", "request_reason": "On Duty"}, "TT/P"),
+    ("Half day", "WFH half day is not On Duty", {"status": "Half Day", "attendance_request": "AR-0003", "in_time": IN_TIME, "out_time": OUT_TIME}, {"worked_half": "First Half", "request_reason": "Work From Home"}, "P/A"),
 
     ("Leave", "Casual Leave", {"status": "On Leave", "leave_type": "Casual Leave"}, {}, "CL"),
     ("Leave", "Sick Leave", {"status": "On Leave", "leave_type": "Sick Leave"}, {}, "SL"),

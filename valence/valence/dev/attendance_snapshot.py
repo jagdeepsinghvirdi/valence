@@ -11,6 +11,18 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import frappe
 from frappe.utils import add_days, flt, get_datetime, getdate
 
+_shift_assignment_cache: Dict[Tuple[str, str], Optional[Dict[str, Any]]] = {}
+_shift_type_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+_employee_holiday_list_cache: Dict[str, Optional[str]] = {}
+_company_holiday_list_cache: Dict[str, Optional[str]] = {}
+
+
+def clear_caches() -> None:
+    _shift_assignment_cache.clear()
+    _shift_type_cache.clear()
+    _employee_holiday_list_cache.clear()
+    _company_holiday_list_cache.clear()
+
 
 def get_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
@@ -109,17 +121,37 @@ def _as_timedelta(value: Any) -> Optional[timedelta]:
 
 
 def _get_company_default_holiday_list() -> Optional[str]:
+    if "company_default" in _company_holiday_list_cache:
+        return _company_holiday_list_cache["company_default"]
     company = frappe.db.get_single_value("Global Defaults", "default_company")
     if not company:
         company = frappe.db.get_value("Company", {}, "name")
+    hl = None
     if company:
-        return frappe.db.get_value("Company", company, "default_holiday_list")
-    return None
+        hl = frappe.db.get_value("Company", company, "default_holiday_list")
+    _company_holiday_list_cache["company_default"] = hl
+    return hl
+
+
+def _get_employee_holiday_list(emp: str) -> Optional[str]:
+    if not emp:
+        return _get_company_default_holiday_list()
+    if emp in _employee_holiday_list_cache:
+        return _employee_holiday_list_cache[emp]
+    emp_hl = frappe.db.get_value("Employee", emp, "holiday_list")
+    if not emp_hl:
+        emp_hl = _get_company_default_holiday_list()
+    _employee_holiday_list_cache[emp] = emp_hl
+    return emp_hl
 
 
 def _get_applicable_shift_assignment(employee: str, date_str: str) -> Optional[Dict[str, Any]]:
     if not employee or not date_str:
         return None
+
+    cache_key = (employee, date_str)
+    if cache_key in _shift_assignment_cache:
+        return _shift_assignment_cache[cache_key]
 
     has_custom_off_day = frappe.get_meta("Shift Assignment").has_field("custom_off_day")
     has_status = frappe.get_meta("Shift Assignment").has_field("status")
@@ -145,8 +177,6 @@ def _get_applicable_shift_assignment(employee: str, date_str: str) -> Optional[D
         ["start_date", "<=", date_str],
         ["docstatus", "=", 1],
     ]
-    if has_status:
-        filters.append(["status", "=", "Active"])
 
     or_filters = [
         ["end_date", ">=", date_str],
@@ -163,10 +193,11 @@ def _get_applicable_shift_assignment(employee: str, date_str: str) -> Optional[D
     )
 
     if not assignments:
+        _shift_assignment_cache[cache_key] = None
         return None
 
     row = assignments[0]
-    return {
+    res = {
         "name": row.get("name"),
         "employee": row.get("employee"),
         "employee_name": row.get("employee_name"),
@@ -179,19 +210,62 @@ def _get_applicable_shift_assignment(employee: str, date_str: str) -> Optional[D
         "department": row.get("department"),
         "docstatus": _to_int_or_none(row.get("docstatus")),
     }
+    _shift_assignment_cache[cache_key] = res
+    return res
 
 
-def _is_overnight_shift(shift_type: Optional[str]) -> bool:
-    if not shift_type or not frappe.db.exists("Shift Type", shift_type):
-        return False
+def _get_shift_type_info(shift_type: Optional[str]) -> Dict[str, Any]:
+    if not shift_type:
+        return {"is_overnight": False, "start_time": "00:00:00", "end_time": "00:00:00"}
+
+    if shift_type in _shift_type_cache:
+        cached = _shift_type_cache[shift_type]
+        if cached is not None:
+            return cached
+
+    if not frappe.db.exists("Shift Type", shift_type):
+        res = {"is_overnight": False, "start_time": "00:00:00", "end_time": "00:00:00"}
+        _shift_type_cache[shift_type] = res
+        return res
+
     times = frappe.db.get_value("Shift Type", shift_type, ["start_time", "end_time"], as_dict=True)
     if not times or times.get("start_time") is None or times.get("end_time") is None:
-        return False
+        res = {"is_overnight": False, "start_time": "00:00:00", "end_time": "00:00:00"}
+        _shift_type_cache[shift_type] = res
+        return res
+
     st = _as_timedelta(times["start_time"])
     et = _as_timedelta(times["end_time"])
     if not st or not et:
-        return False
-    return st > et
+        res = {"is_overnight": False, "start_time": "00:00:00", "end_time": "00:00:00"}
+        _shift_type_cache[shift_type] = res
+        return res
+
+    is_overnight = st > et
+
+    total_sec_st = int(st.total_seconds())
+    st_hours = (total_sec_st // 3600) % 24
+    st_mins = (total_sec_st % 3600) // 60
+    st_secs = total_sec_st % 60
+    st_str = f"{st_hours:02d}:{st_mins:02d}:{st_secs:02d}"
+
+    total_sec_et = int(et.total_seconds())
+    et_hours = (total_sec_et // 3600) % 24
+    et_mins = (total_sec_et % 3600) // 60
+    et_secs = total_sec_et % 60
+    et_str = f"{et_hours:02d}:{et_mins:02d}:{et_secs:02d}"
+
+    res = {
+        "is_overnight": is_overnight,
+        "start_time": st_str,
+        "end_time": et_str,
+    }
+    _shift_type_cache[shift_type] = res
+    return res
+
+
+def _is_overnight_shift(shift_type: Optional[str]) -> bool:
+    return _get_shift_type_info(shift_type).get("is_overnight", False)
 
 
 def fetch_attendance_records(
@@ -278,7 +352,7 @@ def fetch_employee_checkins(
     from_date: str, to_date: str, employee: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     start_dt = f"{from_date} 00:00:00"
-    end_dt = f"{add_days(to_date, 2)} 00:00:00"
+    end_dt = f"{add_days(to_date, 1)} 14:00:00"
 
     filters: List[Any] = [
         ["time", ">=", start_dt],
@@ -359,11 +433,9 @@ def fetch_holiday_lists(
     hl_names: Set[str] = set()
 
     for emp in target_employees:
-        emp_hl = frappe.db.get_value("Employee", emp, "holiday_list")
+        emp_hl = _get_employee_holiday_list(emp)
         if emp_hl:
             hl_names.add(emp_hl)
-        elif company_default_hl:
-            hl_names.add(company_default_hl)
 
     if not target_employees and company_default_hl:
         hl_names.add(company_default_hl)
@@ -433,8 +505,6 @@ def fetch_shift_assignments(
     ]
     if employee:
         filters.append(["employee", "=", employee])
-    if has_status:
-        filters.append(["status", "=", "Active"])
 
     or_filters = [
         ["end_date", ">=", from_date],
@@ -520,8 +590,6 @@ def build_checkin_summaries(
     if not target_employees:
         return []
 
-    company_default_hl = _get_company_default_holiday_list()
-
     emp_checkins_map: Dict[str, List[Dict[str, Any]]] = {emp: [] for emp in target_employees}
     if checkins:
         for chk in checkins:
@@ -538,7 +606,7 @@ def build_checkin_summaries(
     end_d = getdate(to_date)
 
     for emp in sorted(target_employees):
-        emp_hl = frappe.db.get_value("Employee", emp, "holiday_list") or company_default_hl
+        emp_hl = _get_employee_holiday_list(emp)
 
         curr_d = start_d
         while curr_d <= end_d:
@@ -548,10 +616,12 @@ def build_checkin_summaries(
             sa = _get_applicable_shift_assignment(emp, date_str)
             custom_off_day = sa.get("custom_off_day") if sa else None
             shift_type = sa.get("shift_type") if sa else None
-            is_overnight = _is_overnight_shift(shift_type)
+            shift_info = _get_shift_type_info(shift_type)
+            is_overnight = shift_info.get("is_overnight", False)
 
             if is_overnight:
-                w_start = f"{date_str} 00:00:00"
+                st_time = shift_info.get("start_time", "22:00:00")
+                w_start = f"{date_str} {st_time}"
                 w_end = f"{next_date_str} 14:00:00"
             else:
                 w_start = f"{date_str} 00:00:00"
@@ -562,12 +632,8 @@ def build_checkin_summaries(
                 t_val = str(chk.get("time") or "")
                 if not t_val:
                     continue
-                if is_overnight:
-                    if w_start <= t_val < w_end:
-                        matching_punches.append(t_val)
-                else:
-                    if w_start <= t_val < w_end:
-                        matching_punches.append(t_val)
+                if w_start <= t_val < w_end:
+                    matching_punches.append(t_val)
 
             count = len(matching_punches)
             earliest_punch = min(matching_punches) if matching_punches else None
@@ -604,6 +670,8 @@ def generate_snapshot_data(
     to_date_iso = _to_iso_date(to_date)
     if not from_date_iso or not to_date_iso:
         raise ValueError("Invalid from_date or to_date.")
+
+    clear_caches()
 
     attendance = fetch_attendance_records(from_date_iso, to_date_iso, employee)
     checkins = fetch_employee_checkins(from_date_iso, to_date_iso, employee)
@@ -659,16 +727,18 @@ def snapshot(
     from_date: str,
     to_date: str,
     employee: Optional[str] = None,
-    output_path: Optional[str] = None,
+    out_path: Optional[str] = None,
     pretty: bool = True,
+    **kwargs: Any,
 ) -> str:
-    if not output_path:
+    target_path = out_path or kwargs.get("output_path")
+    if not target_path:
         ts = int(time.time())
         emp_tag = f"_{employee}" if employee else ""
         filename = f"attendance_snapshot_{from_date}_{to_date}{emp_tag}_{ts}.json"
-        output_path = os.path.join(tempfile.gettempdir(), filename)
+        target_path = os.path.join(tempfile.gettempdir(), filename)
 
-    validated_path = validate_output_path(output_path)
+    validated_path = validate_output_path(target_path)
     validated_path.parent.mkdir(parents=True, exist_ok=True)
 
     data = generate_snapshot_data(from_date, to_date, employee)
@@ -955,7 +1025,15 @@ def format_diff_report(diff_result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def diff(file_a: str, file_b: str, output_format: str = "text") -> Dict[str, Any]:
+def diff(
+    before_path: str,
+    after_path: str,
+    output_format: str = "text",
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    file_a = before_path or kwargs.get("file_a")
+    file_b = after_path or kwargs.get("file_b")
+
     path_a = Path(file_a).resolve()
     path_b = Path(file_b).resolve()
 
@@ -1185,6 +1263,59 @@ def run_pure_diff_tests() -> bool:
         dup_threw = True
         dup_err = str(e)
     ok("Duplicate Detection: Rejects snapshot with duplicate record identity", dup_threw, dup_err[:80])
+
+    clear_caches()
+    _shift_assignment_cache[("EMP-NIGHT", "2026-09-01")] = {
+        "name": "SA-N1",
+        "employee": "EMP-NIGHT",
+        "shift_type": "Night Shift",
+        "custom_off_day": "Sunday",
+        "start_date": "2026-09-01",
+        "end_date": None,
+        "docstatus": 1,
+    }
+    _shift_assignment_cache[("EMP-NIGHT", "2026-09-02")] = {
+        "name": "SA-N1",
+        "employee": "EMP-NIGHT",
+        "shift_type": "Night Shift",
+        "custom_off_day": "Sunday",
+        "start_date": "2026-09-01",
+        "end_date": None,
+        "docstatus": 1,
+    }
+    _shift_type_cache["Night Shift"] = {
+        "is_overnight": True,
+        "start_time": "22:00:00",
+        "end_time": "06:00:00",
+    }
+    _employee_holiday_list_cache["EMP-NIGHT"] = "Night Holiday List"
+
+    overnight_checkins = [
+        {"name": "CHK-01", "employee": "EMP-NIGHT", "time": "2026-09-01 22:05:00"},
+        {"name": "CHK-02", "employee": "EMP-NIGHT", "time": "2026-09-02 06:10:00"},
+        {"name": "CHK-03", "employee": "EMP-NIGHT", "time": "2026-09-02 22:00:00"},
+        {"name": "CHK-04", "employee": "EMP-NIGHT", "time": "2026-09-03 05:55:00"},
+    ]
+
+    summaries = build_checkin_summaries(
+        "2026-09-01",
+        "2026-09-02",
+        employee="EMP-NIGHT",
+        checkins=overnight_checkins,
+    )
+
+    ok("Overnight Summary: Produces 2 day summaries", len(summaries) == 2)
+    s1 = summaries[0]
+    s2 = summaries[1]
+    ok("Overnight Summary: Day 1 count is 2", s1["count"] == 2)
+    ok("Overnight Summary: Day 1 earliest punch", s1["earliest_punch"] == "2026-09-01 22:05:00")
+    ok("Overnight Summary: Day 1 latest punch includes next-morning checkout", s1["latest_punch"] == "2026-09-02 06:10:00")
+    ok("Overnight Summary: Day 2 count is 2", s2["count"] == 2)
+    ok("Overnight Summary: Day 2 earliest punch", s2["earliest_punch"] == "2026-09-02 22:00:00")
+    ok("Overnight Summary: Day 2 latest punch includes next-morning checkout", s2["latest_punch"] == "2026-09-03 05:55:00")
+    ok("Overnight Summary: No double counting across consecutive overnight shifts", (s1["count"] + s2["count"]) == len(overnight_checkins))
+
+    clear_caches()
 
     all_passed = all(st == "PASS" for st, _, _ in results)
     print(f"\nPure Diff Tests Result: {'ALL PASS' if all_passed else 'FAILURES DETECTED'}")

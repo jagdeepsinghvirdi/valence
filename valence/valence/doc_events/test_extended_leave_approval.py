@@ -17,7 +17,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import frappe
-from frappe.model.workflow import apply_workflow
+import frappe.model.workflow as workflow_mod
+from frappe.model.workflow import apply_workflow, get_transitions
 from frappe.utils import add_days, getdate
 
 from valence.valence.approval_hierarchy import (
@@ -175,6 +176,36 @@ def run():
 			"Assigned HOD can approve employee leave",
 			emp_leave.workflow_state == STATE_APPROVED,
 			emp_leave.workflow_state,
+		)
+
+		# --- HOD who created leave for employee (doc owner) can still approve ---
+		owner_leave = _new_leave(
+			emp,
+			leave_type,
+			days=1,
+			description="EXT hod owner creator",
+			start_offset=FROM_OFFSET + 3,
+		)
+		created.append(owner_leave.name)
+		frappe.db.set_value("Leave Application", owner_leave.name, "owner", HOD_USER)
+		with _as_user(HOD_USER):
+			apply_workflow(frappe.get_doc("Leave Application", owner_leave.name), "Apply")
+			doc = frappe.get_doc("Leave Application", owner_leave.name)
+			approve_transitions = [
+				t for t in get_transitions(doc) if t.get("action") == "Approve"
+			]
+			ok("HOD document owner gets Approve transition", bool(approve_transitions))
+			if approve_transitions:
+				ok(
+					"has_approval_access allows HOD who created leave for employee",
+					workflow_mod.has_approval_access(HOD_USER, doc, approve_transitions[0]),
+				)
+			apply_workflow(doc, "Approve")
+		owner_leave.reload()
+		ok(
+			"HOD document owner approved employee leave",
+			owner_leave.workflow_state == STATE_APPROVED,
+			owner_leave.workflow_state,
 		)
 
 		# --- Wrong Leave Approver (role only) cannot approve ---

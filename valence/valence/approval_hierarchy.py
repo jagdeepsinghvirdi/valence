@@ -470,22 +470,23 @@ def patch_workflow_approval_access():
 		original_access = workflow_mod.has_approval_access
 
 		def has_approval_access(user, doc, transition):
-			if not original_access(user, doc, transition):
-				return False
-
-			if not doc or getattr(doc, "doctype", None) not in SUPPORTED_DOCTYPES:
-				return True
-
 			action = None
 			if isinstance(transition, dict):
 				action = transition.get("action")
 			else:
 				action = getattr(transition, "action", None)
 
-			if action not in APPROVAL_ACTIONS:
-				return True
+			# Frappe blocks doc.owner from Approve/Reject (Desk + apply_workflow).
+			# HOD/HR often creates leave for another employee — owner != applicant.
+			# Use hierarchy (employee self-approve block) instead of owner check.
+			if (
+				doc
+				and getattr(doc, "doctype", None) in SUPPORTED_DOCTYPES
+				and action in APPROVAL_ACTIONS
+			):
+				return user_may_approve_or_reject(doc, user)
 
-			return user_may_approve_or_reject(doc, user)
+			return original_access(user, doc, transition)
 
 		has_approval_access._valence_hierarchy_patched = True  # type: ignore[attr-defined]
 		workflow_mod.has_approval_access = has_approval_access

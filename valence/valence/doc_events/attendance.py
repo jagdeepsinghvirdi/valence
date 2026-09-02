@@ -144,6 +144,8 @@ def _apply_hours_status(attendance, hours, shift_name):
 		attendance.db_set("status", "Absent")
 	elif hours < half_day_threshold:
 		attendance.db_set("status", "Half Day")
+	elif worked_single_half(shift_name, attendance.in_time, attendance.out_time):
+		attendance.db_set("status", "Half Day")
 	else:
 		attendance.db_set("status", "Present")
 
@@ -171,8 +173,9 @@ def get_shift_midpoint(shift_name):
 	return start + timedelta(seconds=span / 2)
 
 
-def get_worked_half(shift_name, in_time, out_time):
-	midpoint = get_shift_midpoint(shift_name)
+def get_worked_half(shift_name, in_time, out_time, midpoint=None):
+	if midpoint is None:
+		midpoint = get_shift_midpoint(shift_name)
 	if not midpoint:
 		return None
 
@@ -196,8 +199,13 @@ def get_worked_half(shift_name, in_time, out_time):
 	return "First Half" if before > 0 else "Second Half"
 
 
-def get_double_shift_factor(shift_name, hours) -> float:
-	shift_len = get_shift_duration_hours(shift_name)
+def worked_single_half(shift_name, in_time, out_time) -> bool:
+	return get_worked_half(shift_name, in_time, out_time) in ("First Half", "Second Half")
+
+
+def get_double_shift_factor(shift_name, hours, shift_len=None) -> float:
+	if shift_len is None:
+		shift_len = get_shift_duration_hours(shift_name)
 	if not shift_len or not hours:
 		return 1.0
 	ratio = flt(hours) / flt(shift_len)

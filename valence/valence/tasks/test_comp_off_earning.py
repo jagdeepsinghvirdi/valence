@@ -144,6 +144,17 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 	def _configure_attendance_settings(cls):
 		if frappe.db.exists("DocType", "Attendance Settings"):
 			settings = frappe.get_single("Attendance Settings")
+			if not settings.leave_creation_window_days:
+				settings.leave_creation_window_days = 3
+			if not settings.super_hod_working_days_threshold:
+				settings.super_hod_working_days_threshold = 3
+			if not settings.short_leave_max_duration_hours:
+				settings.short_leave_max_duration_hours = 2.0
+			if not settings.short_leave_personal_monthly_cap:
+				settings.short_leave_personal_monthly_cap = 2
+			if not settings.offday_full_day_hours:
+				settings.offday_full_day_hours = 6.0
+
 			settings.comp_off_enabled = 1
 			settings.comp_off_auto_credit = 1
 			settings.comp_off_leave_type = cls.leave_type

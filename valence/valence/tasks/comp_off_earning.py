@@ -84,7 +84,7 @@ def get_attendance_comp_off_entries(attendance_name, employee=None, attendance_d
 		entries = frappe.get_all(
 			"Leave Ledger Entry",
 			filters=filters,
-			fields=["name", "leaves", "transaction_name", "leave_type", "company", "custom_attendance"],
+			fields=["name", "leaves", "transaction_type", "transaction_name", "leave_type", "company", "custom_attendance"],
 			order_by="creation asc",
 		)
 		if entries:
@@ -108,7 +108,7 @@ def get_attendance_comp_off_entries(attendance_name, employee=None, attendance_d
 			candidates = frappe.get_all(
 				"Leave Ledger Entry",
 				filters=fallback_filters,
-				fields=["name", "leaves", "transaction_name", "leave_type", "company", "custom_attendance"],
+				fields=["name", "leaves", "transaction_type", "transaction_name", "leave_type", "company", "custom_attendance"],
 				order_by="creation asc",
 			)
 			return [

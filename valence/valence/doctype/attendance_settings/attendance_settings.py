@@ -13,8 +13,8 @@ DEFAULT_COMP_OFF_RULES = [
 	{"attendance_code": "HP/A", "comp_off_days": 0.5, "enabled": 1},
 	{"attendance_code": "2HP", "comp_off_days": 2.0, "enabled": 1},
 	{"attendance_code": "2HP/A", "comp_off_days": 1.5, "enabled": 1},
-	{"attendance_code": "2P", "comp_off_days": 1.0, "enabled": 0},
-	{"attendance_code": "2P/A", "comp_off_days": 0.5, "enabled": 0},
+	{"attendance_code": "2P", "comp_off_days": 1.0, "enabled": 1},
+	{"attendance_code": "2P/A", "comp_off_days": 0.5, "enabled": 1},
 ]
 
 

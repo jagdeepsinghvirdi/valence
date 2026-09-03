@@ -36,12 +36,16 @@ class TestCompOffEarningUnit(unittest.TestCase):
 		self.assertEqual(_match_comp_off_rule("HP/A", rules, 1), 0.5)
 		self.assertEqual(_match_comp_off_rule("2HP", rules, 1), 2.0)
 		self.assertEqual(_match_comp_off_rule("2HP/A", rules, 1), 1.5)
+		self.assertEqual(_match_comp_off_rule("2P", rules, 1), 1.0)
+		self.assertEqual(_match_comp_off_rule("2P/A", rules, 1), 0.5)
 
-	def test_rule_matching_disabled_codes(self):
-		rules = DEFAULT_COMP_OFF_RULES
-		# 2P and 2P/A are disabled by default
-		self.assertEqual(_match_comp_off_rule("2P", rules, 1), 0.0)
-		self.assertEqual(_match_comp_off_rule("2P/A", rules, 1), 0.0)
+	def test_rule_matching_explicitly_disabled_code(self):
+		custom_rules = [
+			{"attendance_code": "2P", "comp_off_days": 1.0, "enabled": 0},
+			{"attendance_code": "PWO", "comp_off_days": 1.0, "enabled": 0},
+		]
+		self.assertEqual(_match_comp_off_rule("2P", custom_rules, 1), 0.0)
+		self.assertEqual(_match_comp_off_rule("PWO", custom_rules, 1), 0.0)
 
 	def test_rule_matching_non_qualifying_codes(self):
 		rules = DEFAULT_COMP_OFF_RULES

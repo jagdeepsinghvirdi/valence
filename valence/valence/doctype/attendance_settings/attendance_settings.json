@@ -4,7 +4,7 @@
  "creation": "2025-04-17 14:19:56.309236",
  "doctype": "DocType",
  "engine": "InnoDB",
-  "field_order": [
+ "field_order": [
   "section_break_fptb",
   "use_late_coming_rules",
   "short_leave_logic",
@@ -18,7 +18,13 @@
   "short_leave_personal_monthly_cap",
   "short_leave_official_monthly_cap",
   "offday_attendance_section",
-  "offday_full_day_hours"
+  "offday_full_day_hours",
+  "comp_off_section",
+  "comp_off_enabled",
+  "comp_off_auto_credit",
+  "column_break_comp_off",
+  "comp_off_leave_type",
+  "comp_off_rules"
  ],
  "fields": [
   {
@@ -116,13 +122,51 @@
    "label": "Full Day Hours on Weekly Off / Holiday",
    "non_negative": 1,
    "precision": "1"
+  },
+  {
+   "fieldname": "comp_off_section",
+   "fieldtype": "Section Break",
+   "label": "Compensatory Off Earning"
+  },
+  {
+   "default": "1",
+   "description": "If enabled, employees earn Compensatory Off balance for qualifying attendance codes (e.g. working on Weekly Off or Holiday).",
+   "fieldname": "comp_off_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Comp Off Earning"
+  },
+  {
+   "default": "1",
+   "description": "Automatically process and credit/reverse Comp Off when Attendance is submitted, updated, or cancelled.",
+   "fieldname": "comp_off_auto_credit",
+   "fieldtype": "Check",
+   "label": "Auto Credit Comp Off on Attendance Submit/Update"
+  },
+  {
+   "fieldname": "column_break_comp_off",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Leave Type credited when Comp Off is earned. Mandatory when Comp Off Earning is enabled.",
+   "fieldname": "comp_off_leave_type",
+   "fieldtype": "Link",
+   "label": "Comp Off Leave Type",
+   "mandatory_depends_on": "eval:doc.comp_off_enabled",
+   "options": "Leave Type"
+  },
+  {
+   "description": "Mapping from Attendance Code to Comp Off days earned.",
+   "fieldname": "comp_off_rules",
+   "fieldtype": "Table",
+   "label": "Comp Off Rules",
+   "options": "Comp Off Rule"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-18 17:55:00.000000",
+ "modified": "2026-09-03 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Valence",
  "name": "Attendance Settings",

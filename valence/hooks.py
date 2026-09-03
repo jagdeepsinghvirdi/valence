@@ -200,9 +200,12 @@ doc_events = {
   "Attendance":{
       "validate":"valence.valence.doc_events.attendance.set_status",
       "after_insert":"valence.valence.doc_events.attendance.set_short_leave_count",
-      "on_update_after_submit": "valence.valence.doc_events.attendance.set_short_leave_count"
-    #   "on_cancel": "valence.valence.doc_events.attendance.cleanup_related_docs",
-    #   "on_trash": "valence.valence.doc_events.attendance.cleanup_related_docs"      
+      "on_submit": "valence.valence.tasks.comp_off_earning.on_attendance_submit",
+      "on_update_after_submit": [
+          "valence.valence.doc_events.attendance.set_short_leave_count",
+          "valence.valence.tasks.comp_off_earning.on_attendance_update_after_submit",
+      ],
+      "on_cancel": "valence.valence.tasks.comp_off_earning.on_attendance_cancel"
   }
 
 }

@@ -8,7 +8,14 @@
   "section_break_fptb",
   "use_late_coming_rules",
   "short_leave_logic",
-  "short_leave_in_month"
+  "short_leave_in_month",
+  "offday_full_day_hours",
+  "comp_off_section",
+  "comp_off_enabled",
+  "comp_off_auto_credit",
+  "column_break_comp_off",
+  "comp_off_leave_type",
+  "comp_off_rules"
  ],
  "fields": [
   {
@@ -32,6 +39,53 @@
    "fieldname": "use_late_coming_rules",
    "fieldtype": "Check",
    "label": "Use Late Coming Rules"
+  },
+  {
+   "fieldname": "offday_full_day_hours",
+   "fieldtype": "Float",
+   "label": "Full Day Hours on Weekly Off / Holiday",
+   "default": "6",
+   "non_negative": 1,
+   "precision": "1",
+   "description": "Minimum hours worked on a Weekly Off or Holiday to count as a full day. Below this it counts as a half day. Used for PWO / PAW and HP / HP-A reporting and Compensatory Off. Default 6."
+  },
+  {
+   "fieldname": "comp_off_section",
+   "fieldtype": "Section Break",
+   "label": "Compensatory Off Earning"
+  },
+  {
+   "fieldname": "comp_off_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Comp Off Earning",
+   "default": "1",
+   "description": "If enabled, employees earn Compensatory Off balance for qualifying attendance codes (e.g. working on Weekly Off or Holiday)."
+  },
+  {
+   "fieldname": "comp_off_auto_credit",
+   "fieldtype": "Check",
+   "label": "Auto Credit Comp Off on Attendance Submit/Update",
+   "default": "1",
+   "description": "Automatically process and credit/reverse Comp Off when Attendance is submitted, updated, or cancelled."
+  },
+  {
+   "fieldname": "column_break_comp_off",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "comp_off_leave_type",
+   "fieldtype": "Link",
+   "label": "Comp Off Leave Type",
+   "options": "Leave Type",
+   "description": "Leave Type credited when Comp Off is earned. Mandatory when Comp Off Earning is enabled.",
+   "mandatory_depends_on": "eval:doc.comp_off_enabled"
+  },
+  {
+   "fieldname": "comp_off_rules",
+   "fieldtype": "Table",
+   "label": "Comp Off Rules",
+   "options": "Comp Off Rule",
+   "description": "Mapping from Attendance Code to Comp Off days earned."
   }
  ],
  "grid_page_length": 50,

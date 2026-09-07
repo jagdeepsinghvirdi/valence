@@ -17,6 +17,7 @@ from valence.valence.tasks.comp_off_earning import (
 	get_attendance_comp_off_entries,
 	get_comp_off_earned,
 	get_comp_off_leave_type,
+	on_attendance_submit,
 	process_comp_off_earning,
 	process_comp_off_for_attendance,
 	reverse_comp_off_for_attendance,
@@ -133,6 +134,10 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		cls.employee, cls.company = cls._ensure_employee()
 		cls._configure_attendance_settings()
 
+	def setUp(self):
+		super().setUp()
+		self._configure_attendance_settings()
+
 	@classmethod
 	def _ensure_leave_type(cls, name):
 		if not frappe.db.exists("Leave Type", name):
@@ -205,23 +210,27 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 				settings.append("comp_off_rules", r)
 			settings.save(ignore_permissions=True)
 
-	def _make_submitted_attendance(self, att_date, status="Present", hours=8.0, employee=None):
+	def _make_submitted_attendance(self, att_date, status="Present", hours=8.0, employee=None, in_time=None, out_time=None):
 		emp = employee or self.employee
 		existing = frappe.db.get_value("Attendance", {"employee": emp, "attendance_date": att_date}, "name")
 		if existing:
 			frappe.delete_doc("Attendance", existing, force=1, ignore_permissions=True)
 
-		doc = frappe.get_doc(
-			{
-				"doctype": "Attendance",
-				"employee": emp,
-				"attendance_date": att_date,
-				"status": status,
-				"working_hours": hours,
-				"company": self.company,
-				"docstatus": 1,
-			}
-		)
+		doc_dict = {
+			"doctype": "Attendance",
+			"employee": emp,
+			"attendance_date": att_date,
+			"status": status,
+			"working_hours": hours,
+			"company": self.company,
+			"docstatus": 1,
+		}
+		if in_time:
+			doc_dict["in_time"] = in_time
+		if out_time:
+			doc_dict["out_time"] = out_time
+
+		doc = frappe.get_doc(doc_dict)
 		doc.insert(ignore_permissions=True)
 		return doc
 
@@ -248,27 +257,112 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		frappe.db.set_single_value("Attendance Settings", "comp_off_leave_type", self.leave_type)
 		self.assertEqual(get_comp_off_leave_type(), self.leave_type)
 
+	def test_settings_rule_validations_and_clearing(self):
+		"""Review #4, #8: Validates negative days, duplicate codes, and intentional clearing."""
+		try:
+			settings = frappe.get_single("Attendance Settings")
+			settings.comp_off_enabled = 1
+			settings.comp_off_leave_type = self.leave_type
+
+			# 1. Negative comp_off_days validation
+			settings.comp_off_rules = [{"attendance_code": "PWO", "comp_off_days": -1.0, "enabled": 1}]
+			with self.assertRaises(frappe.ValidationError):
+				settings.validate()
+
+			# 2. Duplicate attendance_code validation
+			settings.comp_off_rules = [
+				{"attendance_code": "PWO", "comp_off_days": 1.0, "enabled": 1},
+				{"attendance_code": "PWO", "comp_off_days": 2.0, "enabled": 1},
+			]
+			with self.assertRaises(frappe.ValidationError):
+				settings.validate()
+
+			# 3. Intentionally cleared rules table
+			settings.comp_off_rules = []
+			settings.validate()
+			settings.save(ignore_permissions=True)
+			self.assertEqual(len(settings.get("comp_off_rules")), 0)
+		finally:
+			# Restoring default rules
+			self._configure_attendance_settings()
+
 	def test_automatic_allocation_and_ledger_credit(self):
-		"""E23, E24, E25: Qualifying attendance auto-creates Leave Allocation and posts positive Leave Ledger Entry."""
+		"""E23, E24, E25, Review #10: Exact assertion for created allocation and positive ledger credit."""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-AUTO")
 		att_date = add_days(nowdate(), -50)
-		att = self._make_submitted_attendance(att_date, status="Present", hours=8.0)
+		att = self._make_submitted_attendance(att_date, status="Present", hours=8.0, employee=emp)
 
 		# Mock attendance code to PWO
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_for_attendance(att.name)
 
 		# Verify Leave Ledger Entry
+		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		self.assertEqual(len(entries), 1)
+		self.assertEqual(flt(entries[0].leaves), 1.0)
+		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
+		self.assertEqual(entries[0].get("custom_attendance"), att.name)
+
+		# Verify Leave Allocation exact balance
+		alloc_name = entries[0].transaction_name
+		self.assertTrue(bool(alloc_name))
+		alloc = frappe.get_doc("Leave Allocation", alloc_name)
+		self.assertEqual(flt(alloc.total_leaves_allocated), 1.0)
+
+	def test_end_to_end_attendance_submission_real_flow(self):
+		"""Review #5: End-to-end integration test with real Attendance and unmocked get_attendance_code()."""
+		# Create a dedicated holiday list with Sunday weekly off
+		hl_name = "Test Comp Off E2E HL"
+		if frappe.db.exists("Holiday List", hl_name):
+			frappe.delete_doc("Holiday List", hl_name, force=1, ignore_permissions=True)
+
+		hl = frappe.get_doc(
+			{
+				"doctype": "Holiday List",
+				"holiday_list_name": hl_name,
+				"from_date": "2026-01-01",
+				"to_date": "2026-12-31",
+			}
+		)
+		hl.append(
+			"holidays",
+			{"holiday_date": "2026-08-02", "description": "Sunday", "weekly_off": 1},
+		)
+		hl.insert(ignore_permissions=True)
+
+		frappe.db.set_value("Employee", self.employee, "holiday_list", hl_name)
+
+		# Attendance on 2026-08-02 (Sunday Weekly Off) with 8.0 working hours (09:00 to 17:00 punches)
+		att_date = "2026-08-02"
+		att = self._make_submitted_attendance(
+			att_date,
+			status="Present",
+			hours=8.0,
+			in_time="2026-08-02 09:00:00",
+			out_time="2026-08-02 17:00:00",
+		)
+
+		# Process unmocked
+		process_comp_off_for_attendance(att.name)
+
+		# Verify that real get_attendance_code derived PWO and credited 1.0 Comp Off
 		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		self.assertEqual(flt(entries[0].leaves), 1.0)
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
 		self.assertEqual(entries[0].get("custom_attendance"), att.name)
 
-		# Verify Leave Allocation
-		alloc_name = entries[0].transaction_name
-		self.assertTrue(bool(alloc_name))
-		alloc = frappe.get_doc("Leave Allocation", alloc_name)
-		self.assertGreaterEqual(flt(alloc.total_leaves_allocated), 1.0)
+	def test_attendance_submit_non_blocking_on_error(self):
+		"""Review #3: Comp Off error during submission must be logged without raising or blocking."""
+		doc_mock = unittest.mock.MagicMock()
+		doc_mock.name = "ATT-MOCK-FAIL-01"
+
+		with patch("valence.valence.tasks.comp_off_earning._is_auto_credit_enabled", return_value=True):
+			with patch("valence.valence.tasks.comp_off_earning.process_comp_off_for_attendance", side_effect=Exception("DB Error")):
+				with patch("frappe.log_error") as mock_log:
+					# Must not raise exception
+					on_attendance_submit(doc_mock)
+					mock_log.assert_called_once()
 
 	def test_audit_comment_on_leave_allocation(self):
 		"""E26: Audit comment is added to the linked Leave Allocation on credit."""

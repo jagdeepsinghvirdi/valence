@@ -228,7 +228,10 @@ doc_events = {
   },
   # Track B leave rules (shared file with Track A #8 — coordinate edits)
   "Leave Application": {
-      "validate": "valence.valence.doc_events.leave_application.validate",
+      "validate": [
+          "valence.valence.doc_events.leave_application.validate",
+          "valence.valence.doc_events.comp_off_usage.validate_comp_off_application",
+      ],
       "before_submit": "valence.valence.doc_events.leave_application.before_submit",
       "on_update": "valence.valence.doc_events.leave_application.on_update",
   },

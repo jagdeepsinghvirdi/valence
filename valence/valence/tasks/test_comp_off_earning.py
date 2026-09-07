@@ -87,20 +87,29 @@ class TestCompOffEarningUnit(unittest.TestCase):
 		self.assertEqual(res, 1.0)
 
 	def test_on_duty_and_wfh_codes(self):
-		"""E18: OD / WFH on normal day derives P/0.0, but on Weekly Off/Holiday earns Comp Off."""
-		# Normal day OD / WFH -> P -> 0.0 Comp Off
+		"""E18: OD / WFH on normal day derives TT/P (0.0), idle Holiday derives H (0.0), and qualifying offday work earns Comp Off."""
+		# Normal day WFH -> P -> 0.0 Comp Off
 		wfh_normal = {"status": "Work From Home", "working_hours": 8.0}
 		self.assertEqual(get_attendance_code(wfh_normal, context={"day_type": "Normal"}), "P")
 		self.assertEqual(_match_comp_off_rule("P", DEFAULT_COMP_OFF_RULES, 1), 0.0)
+
+		# Normal day On Duty -> TT -> 0.0 Comp Off
+		od_normal = {"status": "On Duty"}
+		self.assertEqual(get_attendance_code(od_normal, context={"day_type": "Normal"}), "TT")
+		self.assertEqual(_match_comp_off_rule("TT", DEFAULT_COMP_OFF_RULES, 1), 0.0)
 
 		# Weekly Off WFH full day -> PWO -> 1.0 Comp Off
 		wfh_wo = {"status": "Work From Home", "working_hours": 8.0}
 		self.assertEqual(get_attendance_code(wfh_wo, context={"day_type": "Weekly Off"}), "PWO")
 		self.assertEqual(_match_comp_off_rule("PWO", DEFAULT_COMP_OFF_RULES, 1), 1.0)
 
-		# Holiday OD half day -> HP/A -> 0.5 Comp Off
-		od_holiday = {"status": "On Duty", "working_hours": 4.0}
-		self.assertEqual(get_attendance_code(od_holiday, context={"day_type": "Holiday"}), "HP/A")
+		# Holiday behavior: idle holiday derives H -> 0.0 Comp Off; working on holiday derives HP/A -> 0.5 Comp Off
+		idle_holiday = {"status": "Holiday", "working_hours": 0}
+		self.assertEqual(get_attendance_code(idle_holiday, context={"day_type": "Holiday"}), "H")
+		self.assertEqual(_match_comp_off_rule("H", DEFAULT_COMP_OFF_RULES, 1), 0.0)
+
+		holiday_work = {"status": "Present", "working_hours": 4.0}
+		self.assertEqual(get_attendance_code(holiday_work, context={"day_type": "Holiday"}), "HP/A")
 		self.assertEqual(_match_comp_off_rule("HP/A", DEFAULT_COMP_OFF_RULES, 1), 0.5)
 
 	def test_custom_rule_comp_off_days(self):

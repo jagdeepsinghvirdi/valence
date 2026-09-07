@@ -7,6 +7,7 @@ Notes:
 """
 
 import frappe
+from frappe import _
 from frappe.utils import flt, nowdate
 
 from hrms.hr.doctype.leave_application.leave_application import get_leave_balance_on
@@ -68,11 +69,15 @@ def validate_comp_off_application(doc, method=None):
 		)
 
 
+@frappe.whitelist()
 def get_comp_off_balance(employee, on_date=None):
 	"""Retrieve the Comp Off leave balance for an employee on a given date.
 
 	Balance must always come from HRMS's get_leave_balance_on() — never a custom calculation.
 	"""
+	if not frappe.db.exists("Employee", employee):
+		frappe.throw(_("Employee {0} does not exist.").format(employee))
+
 	if not on_date:
 		on_date = frappe.utils.nowdate()
 

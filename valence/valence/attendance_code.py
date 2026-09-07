@@ -1,6 +1,3 @@
-# Copyright (c) 2026, finbyz tech and contributors
-# For license information, please see license.txt
-
 import frappe
 from frappe.utils import cint, flt, getdate
 
@@ -27,35 +24,6 @@ def _get_leave_code(leave_type):
 
 
 def get_attendance_code(attendance, context=None):
-	"""
-	Derives the standardized attendance code for an attendance record or dict.
-
-	Target codes:
-	- Weekly Off Work:
-	    PWO   (Full day work on weekly off)
-	    PAW   (Half day work on weekly off)
-	    2PWO  (Double shift full day on weekly off)
-	    2PAW  (Double shift half day on weekly off)
-	    WO    (Idle weekly off)
-	- Holiday Work:
-	    HP    (Full day work on holiday)
-	    HP/A  (Half day work on holiday)
-	    2HP   (Double shift full day on holiday)
-	    2HP/A (Double shift half day on holiday)
-	    H     (Idle holiday)
-	    CO/H  (Comp Off taken on holiday)
-	- Normal Working Day:
-	    P     (Full day present / WFH / Present With Short Leave)
-	    TT    (On Duty)
-	    P/A   (Half day present - first half worked)
-	    A/P   (Half day present - second half worked)
-	    P/CL, CL/P, P/SL, SL/P, P/L, L/A, CL/A, etc. (Half day leaves)
-	    P/TT, TT/P (Half day On Duty)
-	    2P    (Double shift full day on normal day)
-	    2P/A  (Double shift half day on normal day)
-	    CL, SL, EL, CO, L/L (Full day leaves)
-	    A     (Absent)
-	"""
 	if not attendance:
 		return None
 
@@ -72,7 +40,7 @@ def get_attendance_code(attendance, context=None):
 	out_time = doc.get("out_time")
 	attendance_request = doc.get("attendance_request")
 
-	# 1. Resolve Day Type (Weekly Off, Holiday, Normal)
+	# 1. Resolve Day Type
 	day_type = context.get("day_type")
 	if not day_type and employee and attendance_date:
 		try:
@@ -155,25 +123,20 @@ def get_attendance_code(attendance, context=None):
 		return "H"
 
 	# --- NORMAL WORKING DAY ---
-	# Non-reportable statuses
 	if status in ("Mispunch", "No punch"):
 		return None
 
-	# Double shift on normal day
 	if double_factor >= 2.0:
 		return "2P"
 	elif double_factor > 1.0:
 		return "2P/A"
 
-	# Full day present / special presence
 	if status in ("Present", "Work From Home", "Present With Short Leave"):
 		return "P"
 
-	# On Duty full day
 	if status == "On Duty":
 		return "TT"
 
-	# On Leave full day
 	if status == "On Leave":
 		if not leave_type:
 			return "A"
@@ -182,18 +145,15 @@ def get_attendance_code(attendance, context=None):
 		code = _get_leave_code(leave_type)
 		return code or "A"
 
-	# Half Day
 	if status == "Half Day":
 		worked_half = context.get("worked_half", "First Half")
 		req_reason = context.get("request_reason")
-
 		has_punches = bool(in_time and out_time) or (working_hours > 0)
 
 		if leave_type:
 			l_code = "L" if leave_type == "Leave Without Pay" else _get_leave_code(leave_type)
 			if half_day_status == "Absent" or not has_punches:
 				return "{0}/A".format(l_code)
-			# Worked half + leave half
 			if worked_half == "Second Half":
 				return "{0}/P".format(l_code)
 			return "P/{0}".format(l_code)
@@ -210,11 +170,9 @@ def get_attendance_code(attendance, context=None):
 
 		return "P/A"
 
-	# Absent
 	if status == "Absent":
 		return "A"
 
-	# Fallback if working hours exist
 	if working_hours >= 8.0:
 		return "P"
 	elif working_hours > 0:

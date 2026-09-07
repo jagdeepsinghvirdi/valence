@@ -636,6 +636,172 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		entries = get_attendance_comp_off_entries(att.name, self.employee, yesterday, self.leave_type)
 		self.assertEqual(sum(flt(e.leaves) for e in entries), 1.0)
 
+	# ─── Real E2E integration tests using unmocked get_attendance_code() ───────
+
+	def _make_e2e_holiday_list(self, hl_name, weekly_off_date=None, holiday_date=None):
+		"""
+		Create a clean holiday list for E2E tests.
+		weekly_off_date: date string for a weekly-off entry (weekly_off=1)
+		holiday_date: date string for a named holiday (weekly_off=0)
+		"""
+		if frappe.db.exists("Holiday List", hl_name):
+			frappe.delete_doc("Holiday List", hl_name, force=1, ignore_permissions=True)
+
+		hl = frappe.get_doc(
+			{
+				"doctype": "Holiday List",
+				"holiday_list_name": hl_name,
+				"from_date": "2026-01-01",
+				"to_date": "2026-12-31",
+			}
+		)
+		if weekly_off_date:
+			hl.append("holidays", {"holiday_date": weekly_off_date, "description": "Weekly Off", "weekly_off": 1})
+		if holiday_date:
+			hl.append("holidays", {"holiday_date": holiday_date, "description": "Public Holiday", "weekly_off": 0})
+		hl.insert(ignore_permissions=True)
+		return hl.name
+
+	def test_e2e_paw_weekly_off_half_day_boundary(self):
+		"""
+		E2E-PAW: 4 hours on a Weekly Off (below 6-hour full-day threshold) -> PAW -> 0.5 Comp Off.
+		Uses real get_attendance_code() without mocking.
+		"""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-PAW")
+		hl_name = self._make_e2e_holiday_list("Test E2E PAW HL", weekly_off_date="2026-08-09")
+		frappe.db.set_value("Employee", emp, "holiday_list", hl_name)
+
+		att_date = "2026-08-09"  # Sunday Weekly Off
+		att = self._make_submitted_attendance(
+			att_date,
+			status="Present",
+			hours=4.0,
+			employee=emp,
+			in_time="2026-08-09 09:00:00",
+			out_time="2026-08-09 13:00:00",
+		)
+
+		process_comp_off_for_attendance(att.name)
+
+		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		self.assertEqual(len(entries), 1, f"Expected 1 PAW ledger entry, got {len(entries)}")
+		self.assertEqual(flt(entries[0].leaves), 0.5, f"Expected 0.5 Comp Off for PAW, got {flt(entries[0].leaves)}")
+		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
+		self.assertEqual(entries[0].get("custom_attendance"), att.name)
+
+	def test_e2e_hp_holiday_full_day(self):
+		"""
+		E2E-HP: 8 hours on a Named Holiday -> HP -> 1.0 Comp Off.
+		Uses real get_attendance_code() without mocking.
+		"""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-HP")
+		hl_name = self._make_e2e_holiday_list("Test E2E HP HL", holiday_date="2026-08-15")
+		frappe.db.set_value("Employee", emp, "holiday_list", hl_name)
+
+		att_date = "2026-08-15"  # Independence Day holiday (weekly_off=0)
+		att = self._make_submitted_attendance(
+			att_date,
+			status="Present",
+			hours=8.0,
+			employee=emp,
+			in_time="2026-08-15 09:00:00",
+			out_time="2026-08-15 17:00:00",
+		)
+
+		process_comp_off_for_attendance(att.name)
+
+		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		self.assertEqual(len(entries), 1, f"Expected 1 HP ledger entry, got {len(entries)}")
+		self.assertEqual(flt(entries[0].leaves), 1.0, f"Expected 1.0 Comp Off for HP, got {flt(entries[0].leaves)}")
+		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
+		self.assertEqual(entries[0].get("custom_attendance"), att.name)
+
+	def test_e2e_hp_a_holiday_half_day(self):
+		"""
+		E2E-HP/A: 4 hours on a Named Holiday (below 6-hour threshold) -> HP/A -> 0.5 Comp Off.
+		Uses real get_attendance_code() without mocking.
+		"""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-HPA")
+		hl_name = self._make_e2e_holiday_list("Test E2E HPA HL", holiday_date="2026-08-16")
+		frappe.db.set_value("Employee", emp, "holiday_list", hl_name)
+
+		att_date = "2026-08-16"  # Named holiday, not weekly off
+		att = self._make_submitted_attendance(
+			att_date,
+			status="Present",
+			hours=4.0,
+			employee=emp,
+			in_time="2026-08-16 09:00:00",
+			out_time="2026-08-16 13:00:00",
+		)
+
+		process_comp_off_for_attendance(att.name)
+
+		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		self.assertEqual(len(entries), 1, f"Expected 1 HP/A ledger entry, got {len(entries)}")
+		self.assertEqual(flt(entries[0].leaves), 0.5, f"Expected 0.5 Comp Off for HP/A, got {flt(entries[0].leaves)}")
+		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
+		self.assertEqual(entries[0].get("custom_attendance"), att.name)
+
+	def test_e2e_idle_holiday_h_earns_zero(self):
+		"""
+		E2E-H: Idle on a Holiday (status=Holiday, 0 hours) -> H -> 0.0 Comp Off.
+		Uses real get_attendance_code() without mocking.
+		"""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-HIDL")
+		hl_name = self._make_e2e_holiday_list("Test E2E H-Idle HL", holiday_date="2026-08-17")
+		frappe.db.set_value("Employee", emp, "holiday_list", hl_name)
+
+		att_date = "2026-08-17"
+		# Idle on a holiday: status=Holiday, no punches, 0 working hours
+		att = self._make_submitted_attendance(
+			att_date,
+			status="Holiday",
+			hours=0.0,
+			employee=emp,
+		)
+
+		process_comp_off_for_attendance(att.name)
+
+		# H code earns 0.0 Comp Off -> no ledger entry should be created
+		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		self.assertEqual(entries, [], f"Expected no Comp Off for idle Holiday H, got {entries}")
+
+	def test_e2e_2pwo_double_shift(self):
+		"""
+		E2E-2PWO: Double-shift factor >= 2.0 on a Weekly Off -> 2PWO -> 2.0 Comp Off.
+		Uses real get_attendance_code() without mocking.
+		_double_factor is patched before Attendance creation so the on_attendance_submit
+		hook fires with the same patch active, producing exactly 1 ledger entry (2PWO +2.0).
+		The explicit process_comp_off_for_attendance() call is then a no-op (idempotent).
+		"""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-2PWO")
+		hl_name = self._make_e2e_holiday_list("Test E2E 2PWO HL", weekly_off_date="2026-08-23")
+		frappe.db.set_value("Employee", emp, "holiday_list", hl_name)
+
+		att_date = "2026-08-23"  # Sunday Weekly Off
+
+		# Patch _double_factor BEFORE creating/submitting Attendance so that:
+		# - on_attendance_submit hook fires with _double_factor=2.0 -> derives 2PWO -> 1 entry
+		# - explicit process_comp_off_for_attendance call derives 2PWO again -> no-op
+		# Net result: exactly 1 ledger entry with 2.0 leaves
+		with patch("valence.valence.attendance_code._double_factor", return_value=2.0):
+			att = self._make_submitted_attendance(
+				att_date,
+				status="Present",
+				hours=16.0,
+				employee=emp,
+				in_time="2026-08-23 06:00:00",
+				out_time="2026-08-23 22:00:00",
+			)
+			process_comp_off_for_attendance(att.name)
+
+		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		self.assertEqual(len(entries), 1, f"Expected 1 ledger entry for 2PWO, got {len(entries)}")
+		self.assertEqual(flt(entries[0].leaves), 2.0, f"Expected 2.0 Comp Off for 2PWO, got {flt(entries[0].leaves)}")
+		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
+		self.assertEqual(entries[0].get("custom_attendance"), att.name)
+
 
 def run():
 	"""Runner function for unit and integration checks."""

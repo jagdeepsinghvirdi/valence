@@ -72,12 +72,12 @@ def get_attendance_comp_off_entries(attendance_name, employee=None, attendance_d
 	Query submitted Leave Ledger Entries belonging specifically to this Attendance.
 	Uses custom_attendance reference on Leave Ledger Entry for exact identity isolation.
 	Fails safely on query errors without silently swallowing exceptions.
+	Identity is strictly based on custom_attendance = att_name to prevent cross-attendance contamination.
 	"""
 	att_name = attendance_name if isinstance(attendance_name, str) else getattr(attendance_name, "name", None)
 	if not att_name:
 		return []
 
-	# 1. Primary Attendance-specific filter via custom_attendance
 	filters = {
 		"custom_attendance": att_name,
 		"transaction_type": "Leave Allocation",
@@ -86,39 +86,12 @@ def get_attendance_comp_off_entries(attendance_name, employee=None, attendance_d
 	if leave_type:
 		filters["leave_type"] = leave_type
 
-	entries = frappe.get_all(
+	return frappe.get_all(
 		"Leave Ledger Entry",
 		filters=filters,
 		fields=["name", "leaves", "transaction_type", "transaction_name", "leave_type", "company", "custom_attendance"],
 		order_by="creation asc",
 	)
-	if entries:
-		return entries
-
-	# 2. Fallback for unmigrated entries: match employee + date if custom_attendance is not set to another attendance
-	if employee and attendance_date:
-		fallback_filters = {
-			"employee": employee,
-			"from_date": attendance_date,
-			"to_date": attendance_date,
-			"transaction_type": "Leave Allocation",
-			"docstatus": 1,
-		}
-		if leave_type:
-			fallback_filters["leave_type"] = leave_type
-
-		candidates = frappe.get_all(
-			"Leave Ledger Entry",
-			filters=fallback_filters,
-			fields=["name", "leaves", "transaction_type", "transaction_name", "leave_type", "company", "custom_attendance"],
-			order_by="creation asc",
-		)
-		return [
-			c for c in candidates
-			if not c.get("custom_attendance") or c.get("custom_attendance") == att_name
-		]
-
-	return []
 
 
 def process_comp_off_for_attendance(attendance_name):
@@ -241,6 +214,9 @@ def reverse_comp_off_for_attendance(attendance_name):
 	if not att:
 		return
 
+	# Concurrency protection: lock Attendance record (mirrors process_comp_off_for_attendance)
+	frappe.db.sql("SELECT name FROM `tabAttendance` WHERE name = %s FOR UPDATE", (att.name,))
+
 	existing_entries = get_attendance_comp_off_entries(
 		att.name,
 		employee=att.employee,
@@ -327,9 +303,12 @@ def on_attendance_submit(doc, method=None):
 	"""Doc event hook: Automatically credit Comp Off on Attendance submission."""
 	if not _is_auto_credit_enabled():
 		return
+	sp = f"comp_off_submit_{doc.name.replace('-', '_')}"
 	try:
+		frappe.db.savepoint(sp)
 		process_comp_off_for_attendance(doc)
 	except Exception:
+		frappe.db.rollback(save_point=sp)
 		frappe.log_error(frappe.get_traceback(), f"Comp Off auto-credit failed for Attendance {doc.name}")
 
 
@@ -337,17 +316,23 @@ def on_attendance_update_after_submit(doc, method=None):
 	"""Doc event hook: Automatically reprocess Comp Off on Attendance amendment."""
 	if not _is_auto_credit_enabled():
 		return
+	sp = f"comp_off_update_{doc.name.replace('-', '_')}"
 	try:
+		frappe.db.savepoint(sp)
 		process_comp_off_for_attendance(doc)
 	except Exception:
+		frappe.db.rollback(save_point=sp)
 		frappe.log_error(frappe.get_traceback(), f"Comp Off reprocessing failed for Attendance {doc.name}")
 
 
 def on_attendance_cancel(doc, method=None):
 	"""Doc event hook: Automatically reverse Comp Off on Attendance cancellation."""
+	sp = f"comp_off_cancel_{doc.name.replace('-', '_')}"
 	try:
+		frappe.db.savepoint(sp)
 		reverse_comp_off_for_attendance(doc)
 	except Exception:
+		frappe.db.rollback(save_point=sp)
 		frappe.log_error(frappe.get_traceback(), f"Comp Off reversal failed on cancel for Attendance {doc.name}")
 
 

@@ -20,6 +20,21 @@ DEFAULT_COMP_OFF_RULES = [
 
 
 class AttendanceSettings(Document):
+	def before_save(self):
+		"""
+		Auto-initialize DEFAULT_COMP_OFF_RULES only upon genuine initial enablement.
+
+		Rules:
+		- Only populate when comp_off_enabled is being enabled (transitions from 0/None to 1)
+		  and the document has no rules attached.
+		- If comp_off_enabled was already enabled in previous saves, or if an administrator
+		  subsequently clears the rules, has_value_changed('comp_off_enabled') is False,
+		  ensuring intentionally cleared rules are never repopulated.
+		"""
+		if self.comp_off_enabled and not self.get("comp_off_rules"):
+			if self.is_new() or self.has_value_changed("comp_off_enabled"):
+				self.set_default_comp_off_rules()
+
 	def validate(self):
 		self.validate_comp_off_settings()
 

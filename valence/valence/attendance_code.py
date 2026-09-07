@@ -1,232 +1,223 @@
-from frappe.utils import flt
+# Copyright (c) 2026, finbyz tech and contributors
+# For license information, please see license.txt
 
-NON_REPORTABLE_STATUSES = {"Mispunch", "No punch"}
-WORKED_STATUSES = {"Present", "Work From Home", "Present With Short Leave"}
-
-ON_DUTY_STATUS = "On Duty"
-ON_DUTY_CODE = "TT"
-PRESENT_CODE = "P"
-ABSENT_CODE = "A"
-LWP_CODE = "L"
-
-DOUBLE_FULL_FACTOR = 2.0
-DOUBLE_HALF_FACTOR = 1.5
+import frappe
+from frappe.utils import cint, flt, getdate
 
 LEAVE_CODES = {
-	"earned leave": "EL",
-	"privilege leave": "PL",
-	"casual leave": "CL",
-	"sick leave": "SL",
-	"leave without pay": "L",
-	"compensatory off": "CO",
+	"Casual Leave": "CL",
+	"Sick Leave": "SL",
+	"Earned Leave": "EL",
+	"Compensatory Off": "CO",
+	"Leave Without Pay": "LWP",
 }
 
-WEEKLY_OFF_CODES = {
-	"idle": "WO",
-	"half": "PAW",
-	"full": "PWO",
-	"double_half": "2PAW",
-	"double": "2PWO",
-	"compose_leave": False,
-}
+LWP_CODE = "LWP"
 
-HOLIDAY_CODES = {
-	"idle": "H",
-	"half": "HP/A",
-	"full": "HP",
-	"double_half": "2HP/A",
-	"double": "2HP",
-	"compose_leave": True,
-}
 
-NORMAL_CODES = {
-	"full": PRESENT_CODE,
-	"double_half": "2P/A",
-	"double": "2P",
-}
+def _get_leave_code(leave_type):
+	if not leave_type:
+		return ""
+	if leave_type in LEAVE_CODES:
+		return LEAVE_CODES[leave_type]
+	words = leave_type.strip().split()
+	if words:
+		return "".join(w[0].upper() for w in words if w)
+	return leave_type[:2].upper()
 
 
 def get_attendance_code(attendance, context=None):
-	doc = _as_dict(attendance)
-	if not doc:
+	"""
+	Derives the standardized attendance code for an attendance record or dict.
+
+	Target codes:
+	- Weekly Off Work:
+	    PWO   (Full day work on weekly off)
+	    PAW   (Half day work on weekly off)
+	    2PWO  (Double shift full day on weekly off)
+	    2PAW  (Double shift half day on weekly off)
+	    WO    (Idle weekly off)
+	- Holiday Work:
+	    HP    (Full day work on holiday)
+	    HP/A  (Half day work on holiday)
+	    2HP   (Double shift full day on holiday)
+	    2HP/A (Double shift half day on holiday)
+	    H     (Idle holiday)
+	    CO/H  (Comp Off taken on holiday)
+	- Normal Working Day:
+	    P     (Full day present / WFH / Present With Short Leave)
+	    TT    (On Duty)
+	    P/A   (Half day present - first half worked)
+	    A/P   (Half day present - second half worked)
+	    P/CL, CL/P, P/SL, SL/P, P/L, L/A, CL/A, etc. (Half day leaves)
+	    P/TT, TT/P (Half day On Duty)
+	    2P    (Double shift full day on normal day)
+	    2P/A  (Double shift half day on normal day)
+	    CL, SL, EL, CO, L/L (Full day leaves)
+	    A     (Absent)
+	"""
+	if not attendance:
 		return None
 
-	status = doc.get("status")
-	if not status or status in NON_REPORTABLE_STATUSES:
-		return None
-
+	doc = attendance if isinstance(attendance, dict) else attendance.as_dict()
 	context = context or {}
-	day_type = _day_type(doc, context)
 
+	status = doc.get("status")
+	working_hours = flt(doc.get("working_hours", 0.0))
+	employee = doc.get("employee")
+	attendance_date = doc.get("attendance_date")
+	leave_type = doc.get("leave_type")
+	half_day_status = doc.get("half_day_status")
+	in_time = doc.get("in_time")
+	out_time = doc.get("out_time")
+	attendance_request = doc.get("attendance_request")
+
+	# 1. Resolve Day Type (Weekly Off, Holiday, Normal)
+	day_type = context.get("day_type")
+	if not day_type and employee and attendance_date:
+		try:
+			from valence.api import get_offday_status
+
+			offday = get_offday_status(employee, attendance_date, None)
+			if offday in ("Weekly Off", "Holiday"):
+				day_type = offday
+			else:
+				day_type = "Normal"
+		except Exception:
+			day_type = "Normal"
+	elif not day_type:
+		if status == "Weekly Off":
+			day_type = "Weekly Off"
+		elif status == "Holiday":
+			day_type = "Holiday"
+		else:
+			day_type = "Normal"
+
+	# 2. Resolve Double Shift Factor
+	double_factor = 1.0
+	if context.get("double_factor"):
+		double_factor = flt(context.get("double_factor"))
+	elif context.get("is_double_shift"):
+		double_factor = 2.0
+	elif doc.get("custom_double_shift") or doc.get("double_shift") or doc.get("double_shift_factor") == 2:
+		double_factor = 2.0
+
+	# 3. Offday full day hours threshold
+	offday_full_hours = context.get("full_day_hours")
+	if offday_full_hours is None:
+		offday_full_hours = context.get("offday_full_day_hours")
+	if offday_full_hours is None:
+		try:
+			offday_full_hours = flt(
+				frappe.db.get_single_value("Attendance Settings", "offday_full_day_hours") or 6.0
+			)
+		except Exception:
+			offday_full_hours = 6.0
+	else:
+		offday_full_hours = flt(offday_full_hours)
+
+	# --- WEEKLY OFF ---
 	if day_type == "Weekly Off":
-		return _offday_code(doc, context, WEEKLY_OFF_CODES)
+		if status == "On Leave":
+			return "WO"
+		if working_hours > 0:
+			if double_factor >= 2.0:
+				return "2PWO"
+			elif double_factor > 1.0:
+				return "2PAW"
+			elif working_hours >= offday_full_hours:
+				return "PWO"
+			else:
+				return "PAW"
+		if status == "Present" and working_hours == 0:
+			if in_time and out_time:
+				return "PWO"
+		return "WO"
 
+	# --- HOLIDAY ---
 	if day_type == "Holiday":
-		return _offday_code(doc, context, HOLIDAY_CODES)
+		if status == "On Leave":
+			if leave_type == "Compensatory Off":
+				return "CO/H"
+			return "H"
+		if working_hours > 0:
+			if double_factor >= 2.0:
+				return "2HP"
+			elif double_factor > 1.0:
+				return "2HP/A"
+			elif working_hours >= offday_full_hours:
+				return "HP"
+			else:
+				return "HP/A"
+		if status == "Present" and working_hours == 0:
+			if in_time and out_time:
+				return "HP"
+		return "H"
 
-	return _normal_code(doc, context)
+	# --- NORMAL WORKING DAY ---
+	# Non-reportable statuses
+	if status in ("Mispunch", "No punch"):
+		return None
 
+	# Double shift on normal day
+	if double_factor >= 2.0:
+		return "2P"
+	elif double_factor > 1.0:
+		return "2P/A"
 
-def _as_dict(attendance):
-	if isinstance(attendance, dict):
-		return attendance
-	if hasattr(attendance, "as_dict"):
-		return attendance.as_dict()
-	return None
+	# Full day present / special presence
+	if status in ("Present", "Work From Home", "Present With Short Leave"):
+		return "P"
 
+	# On Duty full day
+	if status == "On Duty":
+		return "TT"
 
-def _day_type(doc, context):
-	if "day_type" in context:
-		return context.get("day_type")
-
-	status = doc.get("status")
-	if status == "Weekly Off":
-		return "Weekly Off"
-	if status == "Holiday":
-		return "Holiday"
-
-	from valence.api import get_day_type
-
-	return get_day_type(doc.get("employee"), doc.get("attendance_date"))
-
-
-def _offday_code(doc, context, codes):
-	hours = flt(doc.get("working_hours"))
-
-	if not _is_worked(doc) or hours <= 0:
-		if codes.get("compose_leave"):
-			leave_code = _leave_code(doc.get("leave_type"))
-			if leave_code:
-				return "{0}/{1}".format(leave_code, codes["idle"])
-		return codes["idle"]
-
-	factor = _double_factor(doc, context)
-	if factor >= DOUBLE_FULL_FACTOR:
-		return codes["double"]
-	if factor >= DOUBLE_HALF_FACTOR:
-		return codes["double_half"]
-
-	if hours >= _full_day_hours(context):
-		return codes["full"]
-	return codes["half"]
-
-
-def _normal_code(doc, context):
-	status = doc.get("status")
-
-	if status == ON_DUTY_STATUS:
-		return ON_DUTY_CODE
-
-	if status == "Half Day":
-		return _half_day_code(doc, context)
-
+	# On Leave full day
 	if status == "On Leave":
-		leave_code = _leave_code(doc.get("leave_type"))
-		if not leave_code:
-			return ABSENT_CODE
-		if leave_code == LWP_CODE:
-			return "{0}/{0}".format(LWP_CODE)
-		return leave_code
+		if not leave_type:
+			return "A"
+		if leave_type == "Leave Without Pay":
+			return "L/L"
+		code = _get_leave_code(leave_type)
+		return code or "A"
 
+	# Half Day
+	if status == "Half Day":
+		worked_half = context.get("worked_half", "First Half")
+		req_reason = context.get("request_reason")
+
+		has_punches = bool(in_time and out_time) or (working_hours > 0)
+
+		if leave_type:
+			l_code = "L" if leave_type == "Leave Without Pay" else _get_leave_code(leave_type)
+			if half_day_status == "Absent" or not has_punches:
+				return "{0}/A".format(l_code)
+			# Worked half + leave half
+			if worked_half == "Second Half":
+				return "{0}/P".format(l_code)
+			return "P/{0}".format(l_code)
+
+		if attendance_request and req_reason == "On Duty":
+			if worked_half == "Second Half":
+				return "TT/P"
+			return "P/TT"
+
+		if half_day_status == "Absent" or has_punches or working_hours > 0:
+			if worked_half == "Second Half":
+				return "A/P"
+			return "P/A"
+
+		return "P/A"
+
+	# Absent
 	if status == "Absent":
-		return ABSENT_CODE
+		return "A"
 
-	if not _is_worked(doc):
-		return ABSENT_CODE
+	# Fallback if working hours exist
+	if working_hours >= 8.0:
+		return "P"
+	elif working_hours > 0:
+		return "P/A"
 
-	factor = _double_factor(doc, context)
-	if factor >= DOUBLE_FULL_FACTOR:
-		return NORMAL_CODES["double"]
-	if factor >= DOUBLE_HALF_FACTOR:
-		return NORMAL_CODES["double_half"]
-	return NORMAL_CODES["full"]
-
-
-def _half_day_code(doc, context):
-	leave_code = _leave_code(doc.get("leave_type"))
-	worked_half = _worked_half(doc, context)
-
-	if leave_code:
-		if _worked_other_half(doc):
-			return _ordered(PRESENT_CODE, leave_code, worked_half)
-		return "{0}/{1}".format(leave_code, ABSENT_CODE)
-
-	if _request_reason(doc, context) == ON_DUTY_STATUS:
-		return _ordered(PRESENT_CODE, ON_DUTY_CODE, worked_half)
-
-	return _ordered(PRESENT_CODE, ABSENT_CODE, worked_half)
-
-
-def _ordered(worked_token, other_token, worked_half):
-	if worked_half == "Second Half":
-		return "{0}/{1}".format(other_token, worked_token)
-	return "{0}/{1}".format(worked_token, other_token)
-
-
-def _request_reason(doc, context):
-	if "request_reason" in context:
-		return context.get("request_reason")
-
-	request = doc.get("attendance_request")
-	if not request:
-		return None
-
-	import frappe
-
-	return frappe.db.get_value("Attendance Request", request, "reason")
-
-
-def _worked_other_half(doc):
-	if doc.get("half_day_status") == "Present":
-		return True
-	if doc.get("half_day_status") == "Absent":
-		return False
-	return bool(doc.get("in_time") and doc.get("out_time"))
-
-
-def _is_worked(doc):
-	if doc.get("status") in WORKED_STATUSES:
-		return True
-	return bool(doc.get("in_time") and doc.get("out_time"))
-
-
-def _leave_code(leave_type):
-	if not leave_type:
-		return None
-
-	key = leave_type.strip().lower()
-	if key in LEAVE_CODES:
-		return LEAVE_CODES[key]
-
-	initials = "".join(word[0] for word in leave_type.split() if word)
-	return initials.upper() or None
-
-
-def _double_factor(doc, context):
-	if "double_factor" in context:
-		return flt(context.get("double_factor"))
-
-	from valence.valence.doc_events.attendance import get_double_shift_factor
-
-	return flt(get_double_shift_factor(doc.get("shift"), flt(doc.get("working_hours"))))
-
-
-def _worked_half(doc, context):
-	if "worked_half" in context:
-		return context.get("worked_half")
-
-	if not (doc.get("in_time") and doc.get("out_time")):
-		return None
-
-	from valence.valence.doc_events.attendance import get_worked_half
-
-	return get_worked_half(doc.get("shift"), doc.get("in_time"), doc.get("out_time"))
-
-
-def _full_day_hours(context):
-	if "full_day_hours" in context:
-		return flt(context.get("full_day_hours"))
-
-	from valence.valence.doc_events.attendance import get_offday_full_day_hours
-
-	return flt(get_offday_full_day_hours())
+	return status or "A"

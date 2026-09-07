@@ -3,11 +3,14 @@ Extended Leave Approval Workflow — shared approval hierarchy.
 
 Rules (Desk + API + pending docs):
 1. Identify the applicant (Employee.user_id).
-2. Route by assigned Leave Approver — not merely "has Leave Approver role".
-3. Never allow self-approval at any level.
-4. If no valid leave approver (missing or self), route to HR.
-5. If no HR available, route to Administrator (DBA).
-6. Same rules for Leave Application and Attendance Request (OD/WFH).
+2. Prefer assigned Leave Approver (Employee / Department / doc.leave_approver).
+3. Also allow Leave Approver users in the applicant's department (same as list
+   visibility) so department HODs see Approve/Reject Actions on Desk.
+4. Never allow self-approval at any level.
+5. If no valid leave approver (missing or self), still notify HR; HR / Admin
+   can always approve. Department HODs can still act (rule 3).
+6. If no HR available, Administrator (DBA) remains the fallback.
+7. Same rules for Leave Application and Attendance Request (OD/WFH).
 """
 
 from __future__ import annotations
@@ -163,7 +166,7 @@ def user_may_approve_or_reject(doc, user: str | None = None) -> bool:
 	state = doc.get("workflow_state") or "Draft"
 
 	if state == STATE_PENDING_HOD:
-		return _may_act_at_hod_stage(user, employee)
+		return _may_act_at_hod_stage(user, employee, doc)
 
 	if state == STATE_PENDING_SUPER_HOD:
 		return _may_act_at_super_hod_stage(user, employee)
@@ -171,7 +174,7 @@ def user_may_approve_or_reject(doc, user: str | None = None) -> bool:
 	return False
 
 
-def _may_act_at_hod_stage(user: str, employee: str | None) -> bool:
+def _may_act_at_hod_stage(user: str, employee: str | None, doc=None) -> bool:
 	# Administrator is the ultimate fallback — always allowed so flow never sticks
 	if user == "Administrator":
 		return True
@@ -180,15 +183,44 @@ def _may_act_at_hod_stage(user: str, employee: str | None) -> bool:
 	if user_has_any_role(user, list(HR_ROLES) + list(SYSTEM_ROLES)):
 		return True
 
-	routing = resolve_hod_stage_routing(employee)
-	if routing["level"] == "leave_approver":
-		# Must be the assigned leave approver — Leave Approver role alone is not enough
-		return user in routing["users"]
+	# Approver named on the document (Leave Application.leave_approver)
+	if doc and doc.get("leave_approver") == user:
+		return True
 
-	if routing["level"] == "hr":
-		return user in routing["users"] or user_has_any_role(user, list(HR_ROLES))
+	routing = resolve_hod_stage_routing(employee)
+	if routing["level"] == "leave_approver" and user in routing["users"]:
+		return True
+
+	if routing["level"] == "hr" and (
+		user in routing["users"] or user_has_any_role(user, list(HR_ROLES))
+	):
+		return True
+
+	# Department HOD: Leave Approver in the same department as the applicant.
+	# Matches list/form visibility — without this, HODs can open "Pending HOD"
+	# leaves but Desk hides Actions (only Admin/HR could approve).
+	if _is_department_leave_approver(user, employee):
+		return True
 
 	return user == "Administrator"
+
+
+def _is_department_leave_approver(user: str, employee: str | None) -> bool:
+	"""Leave Approver role + same department as the leave applicant."""
+	if not employee or not user_has_any_role(user, (LEAVE_APPROVER_ROLE,)):
+		return False
+
+	approver_emp = frappe.db.get_value(
+		"Employee",
+		{"user_id": user},
+		["name", "department"],
+		as_dict=True,
+	)
+	if not approver_emp or not approver_emp.department:
+		return False
+
+	emp_dept = frappe.db.get_value("Employee", employee, "department")
+	return bool(emp_dept and emp_dept == approver_emp.department)
 
 
 def _may_act_at_super_hod_stage(user: str, employee: str | None) -> bool:
@@ -438,22 +470,23 @@ def patch_workflow_approval_access():
 		original_access = workflow_mod.has_approval_access
 
 		def has_approval_access(user, doc, transition):
-			if not original_access(user, doc, transition):
-				return False
-
-			if not doc or getattr(doc, "doctype", None) not in SUPPORTED_DOCTYPES:
-				return True
-
 			action = None
 			if isinstance(transition, dict):
 				action = transition.get("action")
 			else:
 				action = getattr(transition, "action", None)
 
-			if action not in APPROVAL_ACTIONS:
-				return True
+			# Frappe blocks doc.owner from Approve/Reject (Desk + apply_workflow).
+			# HOD/HR often creates leave for another employee — owner != applicant.
+			# Use hierarchy (employee self-approve block) instead of owner check.
+			if (
+				doc
+				and getattr(doc, "doctype", None) in SUPPORTED_DOCTYPES
+				and action in APPROVAL_ACTIONS
+			):
+				return user_may_approve_or_reject(doc, user)
 
-			return user_may_approve_or_reject(doc, user)
+			return original_access(user, doc, transition)
 
 		has_approval_access._valence_hierarchy_patched = True  # type: ignore[attr-defined]
 		workflow_mod.has_approval_access = has_approval_access

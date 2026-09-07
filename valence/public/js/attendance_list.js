@@ -1,5 +1,5 @@
 frappe.listview_settings["Attendance"] = {
-    add_fields: ["status", "attendance_date"],
+    add_fields: ["status", "attendance_date", "employee"],
 
     get_indicator: function (doc) {
 		if (["Present", "Work From Home","On Duty"].includes(doc.status)) {
@@ -33,28 +33,21 @@ frappe.listview_settings["Attendance"] = {
             let calls = [];
 
             selected_docs.forEach(doc => {
-                if (doc.status === 'No punch') {
-                    calls.push(
-                        frappe.call({
-                            method: "valence.api.get_employee_checkin_entries_multiple",
-                            args: {
-                                employee: doc.employee,
-                                attendance_date: doc.attendance_date,
-                                attendance: doc.name
-                            }
-                        }).then(r => {
-                            if (r.message) {
-                                messages.push(r.message.message);
-                            }
-                        })
-                    );
-                }
+                calls.push(
+                    frappe.call({
+                        method: "valence.api.get_employee_checkin_entries_multiple",
+                        args: {
+                            employee: doc.employee,
+                            attendance_date: doc.attendance_date,
+                            attendance: doc.name
+                        }
+                    }).then(r => {
+                        if (r.message) {
+                            messages.push(r.message.message);
+                        }
+                    })
+                );
             });
-
-            if (!calls.length) {
-                frappe.msgprint(__('No selected records with status "No punch".'));
-                return;
-            }
 
             Promise.all(calls).then(() => {
                 frappe.msgprint({

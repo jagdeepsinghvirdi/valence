@@ -373,8 +373,19 @@ def _ensure_workflow():
 			_transition(STATE_DRAFT, "Apply", STATE_PENDING_HOD, role, allow_self_approval=1)
 		)
 
-	# HOD / Leave Approver / Super HOD (as assigned approver) / HR / Administrator
-	for role in ("Leave Approver", "Super HOD", "HR Manager", "HR User", "Administrator"):
+	# HOD stage: role list is intentionally wide — valence.approval_hierarchy
+	# filters Approve/Reject to assigned leave approver, same-department HOD,
+	# HR, or Administrator. Including Employee covers HODs who are set as
+	# leave_approver but were never given the Leave Approver role (common
+	# production gap that hid Desk Actions while Admin still saw them).
+	for role in (
+		"Leave Approver",
+		"Employee",
+		"Super HOD",
+		"HR Manager",
+		"HR User",
+		"Administrator",
+	):
 		transitions.append(
 			_transition(
 				STATE_PENDING_HOD,

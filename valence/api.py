@@ -73,8 +73,88 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
     }
 
 @frappe.whitelist()
+def get_attendance_connections(employee, attendance_date):
+    if not employee or not attendance_date:
+        return {
+            "leave_applications": [],
+            "short_leave_applications": [],
+            "shift_assignments": [],
+        }
+
+    leave_applications = frappe.get_list(
+        "Leave Application",
+        filters={
+            "employee": employee,
+            "docstatus": ["<", 2],
+            "from_date": ["<=", attendance_date],
+            "to_date": [">=", attendance_date],
+        },
+        fields=["name", "leave_type", "status"],
+        order_by="from_date desc",
+        ignore_permissions=False,
+    )
+
+    short_leave_applications = frappe.get_list(
+        "Short Leave Application",
+        filters={
+            "employee": employee,
+            "date": attendance_date,
+            "docstatus": ["<", 2],
+        },
+        fields=["name", "short_leave_type", "status"],
+        order_by="from_time asc",
+        ignore_permissions=False,
+    )
+
+    shift_assignments = frappe.get_list(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "docstatus": 1,
+            "start_date": ["<=", attendance_date],
+        },
+        or_filters=[
+            ["end_date", ">=", attendance_date],
+            ["end_date", "is", "not set"],
+        ],
+        fields=["name", "shift_type", "status"],
+        order_by="start_date desc",
+        ignore_permissions=False,
+    )
+
+    return {
+        "leave_applications": leave_applications,
+        "short_leave_applications": short_leave_applications,
+        "shift_assignments": shift_assignments,
+    }
+
+
+def _leave_protected_attendance(attendance):
+    row = frappe.db.get_value(
+        "Attendance",
+        attendance,
+        ["status", "leave_application", "leave_type"],
+        as_dict=True,
+    )
+    if not row:
+        return None
+    if row.leave_application:
+        return row.leave_application
+    if row.status == "On Leave":
+        return row.leave_type or "On Leave"
+    return None
+
+
+@frappe.whitelist()
 def get_employee_checkin_entries_multiple(employee, attendance_date, attendance):
     messages = []
+
+    protected = _leave_protected_attendance(attendance)
+    if protected:
+        return {
+            "attendance": attendance,
+            "message": f"{attendance}: Skipped, approved leave ({protected}) was not overwritten.",
+        }
 
     # Convert date safely
     if isinstance(attendance_date, str):
@@ -222,6 +302,82 @@ def get_shift_weekly_off_days(employee, date_obj):
         return {d.strip().lower() for d in raw.split(",") if d.strip()}
 
     return set()
+
+
+def get_day_type_map(employees, start_date, end_date):
+    from frappe.utils import add_days
+
+    employees = [e for e in (employees or []) if e]
+    if not employees:
+        return {}
+
+    start = getdate(start_date)
+    end = getdate(end_date)
+
+    holiday_lists = {}
+    for row in frappe.get_all(
+        "Employee",
+        filters={"name": ["in", employees]},
+        fields=["name", "holiday_list"],
+    ):
+        holiday_lists[row.name] = row.holiday_list
+
+    distinct_lists = sorted({hl for hl in holiday_lists.values() if hl})
+    holidays = {}
+    if distinct_lists:
+        for row in frappe.get_all(
+            "Holiday",
+            filters={
+                "parent": ["in", distinct_lists],
+                "holiday_date": ["between", [start, end]],
+            },
+            fields=["parent", "holiday_date", "weekly_off"],
+        ):
+            holidays[(row.parent, getdate(row.holiday_date))] = cint(row.weekly_off)
+
+    assignments = {}
+    if frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        rows = frappe.get_all(
+            "Shift Assignment",
+            filters={
+                "employee": ["in", employees],
+                "docstatus": 1,
+                "start_date": ["<=", end],
+            },
+            or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
+            fields=["employee", "custom_off_day", "start_date", "end_date"],
+            order_by="start_date desc",
+        )
+        for row in rows:
+            assignments.setdefault(row.employee, []).append(row)
+
+    def off_days_for(employee, date_obj):
+        for row in assignments.get(employee, []):
+            if getdate(row.start_date) > date_obj:
+                continue
+            if row.end_date and getdate(row.end_date) < date_obj:
+                continue
+            raw = (row.custom_off_day or "").strip()
+            if not raw:
+                continue
+            return {d.strip().lower() for d in raw.split(",") if d.strip()}
+        return set()
+
+    result = {}
+    day = start
+    while day <= end:
+        weekday = day.strftime("%A").lower()
+        for employee in employees:
+            holiday_list = holiday_lists.get(employee)
+            day_type = None
+            if holiday_list and (holiday_list, day) in holidays:
+                day_type = "Weekly Off" if holidays[(holiday_list, day)] else "Holiday"
+            elif weekday in off_days_for(employee, day):
+                day_type = "Weekly Off"
+            result[(employee, day)] = day_type
+        day = add_days(day, 1)
+
+    return result
 
 
 def get_day_type(employee, attendance_date):

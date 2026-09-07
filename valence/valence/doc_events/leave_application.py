@@ -7,11 +7,13 @@ from frappe.model.workflow import get_workflow_name
 # Keep each rule in its own function; coordinate before editing this file.
 
 SUPER_HOD_STATE = "Pending Super HOD Approval"
+DRAFT_STATE = "Draft"
 WORKING_LEAVE_DAYS_FIELD = "custom_working_leave_days"
 
 
 def validate(doc, method=None):
 	"""Leave Application validate — runs each rule in order."""
+	reset_approval_on_amend(doc, method)
 	set_working_leave_days(doc, method)
 	validate_leave_creation_window(doc, method)
 	validate_no_leave_on_present_day(doc, method)
@@ -38,6 +40,17 @@ def on_update(doc, method=None):
 
 	route_pending_hod(doc)
 	notify_super_hod_if_needed(doc, method)
+
+
+def reset_approval_on_amend(doc, method=None):
+	if not doc.get("amended_from") or not doc.is_new():
+		return
+
+	if doc.get("workflow_state") in (DRAFT_STATE, None, ""):
+		return
+
+	doc.workflow_state = DRAFT_STATE
+	doc.status = "Open"
 
 
 def sync_leave_status_from_workflow(doc, method=None):

@@ -276,8 +276,7 @@ scheduler_events = {
     "cron": {
         "0 0 * * *": [
             "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches",
-            "valence.valence.doc_events.attendance.process_attendance_offdays",
-            "valence.valence.tasks.comp_off_earning.run_daily_comp_off_earning"
+            "valence.valence.tasks.comp_off_earning.process_attendance_offdays_and_comp_off"
         ],
         "0 4 * * THU": [
 			"valence.api.sales_invoice_payment_remainder",

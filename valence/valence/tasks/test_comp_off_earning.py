@@ -18,6 +18,7 @@ from valence.valence.tasks.comp_off_earning import (
 	get_comp_off_earned,
 	get_comp_off_leave_type,
 	on_attendance_submit,
+	process_attendance_offdays_and_comp_off,
 	process_comp_off_earning,
 	process_comp_off_for_attendance,
 	reverse_comp_off_for_attendance,
@@ -297,7 +298,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 			process_comp_off_for_attendance(att.name)
 
 		# Verify Leave Ledger Entry
-		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		self.assertEqual(flt(entries[0].leaves), 1.0)
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
@@ -346,7 +347,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		process_comp_off_for_attendance(att.name)
 
 		# Verify that real get_attendance_code derived PWO and credited 1.0 Comp Off
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		self.assertEqual(flt(entries[0].leaves), 1.0)
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
@@ -372,7 +373,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		alloc_name = entries[0].transaction_name
 
@@ -393,7 +394,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 			process_comp_off_for_attendance(att.name)
 			process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		self.assertEqual(flt(entries[0].leaves), 1.0)
 
@@ -406,7 +407,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PAW"):
 			process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		self.assertEqual(flt(entries[0].leaves), 0.5)
 		alloc_name = entries[0].transaction_name
@@ -415,7 +416,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="2PWO"):
 			process_comp_off_for_attendance(att.name)
 
-		entries_after = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries_after = get_attendance_comp_off_entries(att.name, self.leave_type)
 		# 1 initial (+0.5), 1 reversal (-0.5), 1 new credit (+2.0) -> total 3 entries, net sum = 2.0
 		self.assertEqual(len(entries_after), 3)
 		net_sum = sum(flt(e.leaves) for e in entries_after)
@@ -430,7 +431,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		alloc_name = entries[0].transaction_name
 		alloc_doc = frappe.get_doc("Leave Allocation", alloc_name)
@@ -440,7 +441,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="P"):
 			process_comp_off_for_attendance(att.name)
 
-		entries_after = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries_after = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries_after), 2)  # 1 initial +1.0, 1 reversal -1.0
 		self.assertEqual(sum(flt(e.leaves) for e in entries_after), 0.0)
 
@@ -455,7 +456,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1)
 		alloc_name = entries[0].transaction_name
 		alloc_before = frappe.get_doc("Leave Allocation", alloc_name)
@@ -464,7 +465,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		# Cancel attendance
 		reverse_comp_off_for_attendance(att.name)
 
-		entries_after = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries_after = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries_after), 2)
 		net_sum = sum(flt(e.leaves) for e in entries_after)
 		self.assertEqual(net_sum, 0.0)
@@ -486,7 +487,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		# Reversal should still succeed using historical entry
 		reverse_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		net_sum = sum(flt(e.leaves) for e in entries)
 		self.assertEqual(net_sum, 0.0)
 
@@ -502,7 +503,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_for_attendance(att.name)
 
-		comp_off_entries = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		comp_off_entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(comp_off_entries), 1)
 		alloc_name = comp_off_entries[0].transaction_name
 
@@ -530,7 +531,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		reverse_comp_off_for_attendance(att.name)
 
 		# Comp Off entries for this attendance must be net 0
-		comp_off_after = get_attendance_comp_off_entries(att.name, self.employee, att_date, self.leave_type)
+		comp_off_after = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(comp_off_after), 2)
 		self.assertEqual(sum(flt(e.leaves) for e in comp_off_after), 0.0)
 
@@ -552,16 +553,16 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PAW"):
 			process_comp_off_for_attendance(att2.name)
 
-		entries1 = get_attendance_comp_off_entries(att1.name, self.employee, att_date1, self.leave_type)
-		entries2 = get_attendance_comp_off_entries(att2.name, self.employee, att_date2, self.leave_type)
+		entries1 = get_attendance_comp_off_entries(att1.name, self.leave_type)
+		entries2 = get_attendance_comp_off_entries(att2.name, self.leave_type)
 		self.assertEqual(sum(flt(e.leaves) for e in entries1), 1.0)
 		self.assertEqual(sum(flt(e.leaves) for e in entries2), 0.5)
 
 		# Reverse att1 only
 		reverse_comp_off_for_attendance(att1.name)
 
-		entries1_after = get_attendance_comp_off_entries(att1.name, self.employee, att_date1, self.leave_type)
-		entries2_after = get_attendance_comp_off_entries(att2.name, self.employee, att_date2, self.leave_type)
+		entries1_after = get_attendance_comp_off_entries(att1.name, self.leave_type)
+		entries2_after = get_attendance_comp_off_entries(att2.name, self.leave_type)
 
 		self.assertEqual(sum(flt(e.leaves) for e in entries1_after), 0.0)
 		self.assertEqual(sum(flt(e.leaves) for e in entries2_after), 0.5)
@@ -580,7 +581,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 
 		self.assertGreaterEqual(res.get("processed", 0), 3)
 		for att in (att1, att2, att3):
-			entries = get_attendance_comp_off_entries(att.name, self.employee, att.attendance_date, self.leave_type)
+			entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 			self.assertEqual(sum(flt(e.leaves) for e in entries), 1.0)
 
 	def test_batch_processing_employee_filter(self):
@@ -593,8 +594,8 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_earning(from_date=d, to_date=d, employee=self.employee)
 
-		entries1 = get_attendance_comp_off_entries(att1.name, self.employee, d, self.leave_type)
-		entries2 = get_attendance_comp_off_entries(att2.name, emp2, d, self.leave_type)
+		entries1 = get_attendance_comp_off_entries(att1.name, self.leave_type)
+		entries2 = get_attendance_comp_off_entries(att2.name, self.leave_type)
 
 		self.assertEqual(sum(flt(e.leaves) for e in entries1), 1.0)
 		self.assertEqual(sum(flt(e.leaves) for e in entries2), 0.0)
@@ -622,7 +623,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			process_comp_off_for_attendance(draft_att.name)
 
-		entries = get_attendance_comp_off_entries(draft_att.name, self.employee, d, self.leave_type)
+		entries = get_attendance_comp_off_entries(draft_att.name, self.leave_type)
 		self.assertEqual(entries, [])
 
 	def test_run_daily_comp_off_earning_processes_yesterday(self):
@@ -633,8 +634,27 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		with patch("valence.valence.tasks.comp_off_earning.get_attendance_code", return_value="PWO"):
 			run_daily_comp_off_earning()
 
-		entries = get_attendance_comp_off_entries(att.name, self.employee, yesterday, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(sum(flt(e.leaves) for e in entries), 1.0)
+
+	def test_process_attendance_offdays_and_comp_off_execution_order(self):
+		"""Review Point 1: Guaranteed sequential execution order of Attendance off-days before Comp Off."""
+		execution_order = []
+
+		def mock_offdays():
+			execution_order.append("offdays")
+
+		def mock_comp_off(from_date, to_date):
+			execution_order.append("comp_off")
+			return {"processed": 0, "attendances": []}
+
+		with patch("valence.valence.doc_events.attendance.process_attendance_offdays", side_effect=mock_offdays) as patch_offdays:
+			with patch("valence.valence.tasks.comp_off_earning.process_comp_off_earning", side_effect=mock_comp_off) as patch_comp_off:
+				process_attendance_offdays_and_comp_off()
+
+				self.assertEqual(execution_order, ["offdays", "comp_off"])
+				patch_offdays.assert_called_once()
+				patch_comp_off.assert_called_once()
 
 	# ─── Real E2E integration tests using unmocked get_attendance_code() ───────
 
@@ -683,9 +703,41 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 
 		process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1, f"Expected 1 PAW ledger entry, got {len(entries)}")
 		self.assertEqual(flt(entries[0].leaves), 0.5, f"Expected 0.5 Comp Off for PAW, got {flt(entries[0].leaves)}")
+		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
+		self.assertEqual(entries[0].get("custom_attendance"), att.name)
+
+	def test_e2e_pwo_weekly_off_exact_6h_boundary(self):
+		"""
+		Review Point 2: Exact 6.0 working hours boundary on Weekly Off.
+		Full-day threshold is configured at offday_full_day_hours = 6.0.
+		At exactly 6.0 hours: hours >= 6.0 is True -> PWO -> 1.0 Comp Off.
+		This proves the exact boundary:
+		4.0 hours (< 6.0) -> PAW -> 0.5 Comp Off
+		6.0 hours (== 6.0) -> PWO -> 1.0 Comp Off
+		Uses real get_attendance_code() without mocking.
+		"""
+		emp, _ = self._ensure_employee("TEST-COMP-OFF-6H")
+		hl_name = self._make_e2e_holiday_list("Test E2E 6H HL", weekly_off_date="2026-08-30")
+		frappe.db.set_value("Employee", emp, "holiday_list", hl_name)
+
+		att_date = "2026-08-30"  # Sunday Weekly Off
+		att = self._make_submitted_attendance(
+			att_date,
+			status="Present",
+			hours=6.0,
+			employee=emp,
+			in_time="2026-08-30 09:00:00",
+			out_time="2026-08-30 15:00:00",
+		)
+
+		process_comp_off_for_attendance(att.name)
+
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
+		self.assertEqual(len(entries), 1, f"Expected 1 PWO ledger entry for exact 6h, got {len(entries)}")
+		self.assertEqual(flt(entries[0].leaves), 1.0, f"Expected 1.0 Comp Off for PWO at 6h, got {flt(entries[0].leaves)}")
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
 		self.assertEqual(entries[0].get("custom_attendance"), att.name)
 
@@ -710,7 +762,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 
 		process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1, f"Expected 1 HP ledger entry, got {len(entries)}")
 		self.assertEqual(flt(entries[0].leaves), 1.0, f"Expected 1.0 Comp Off for HP, got {flt(entries[0].leaves)}")
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
@@ -737,7 +789,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 
 		process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1, f"Expected 1 HP/A ledger entry, got {len(entries)}")
 		self.assertEqual(flt(entries[0].leaves), 0.5, f"Expected 0.5 Comp Off for HP/A, got {flt(entries[0].leaves)}")
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")
@@ -764,7 +816,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		process_comp_off_for_attendance(att.name)
 
 		# H code earns 0.0 Comp Off -> no ledger entry should be created
-		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(entries, [], f"Expected no Comp Off for idle Holiday H, got {entries}")
 
 	def test_e2e_2pwo_double_shift(self):
@@ -796,7 +848,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 			)
 			process_comp_off_for_attendance(att.name)
 
-		entries = get_attendance_comp_off_entries(att.name, emp, att_date, self.leave_type)
+		entries = get_attendance_comp_off_entries(att.name, self.leave_type)
 		self.assertEqual(len(entries), 1, f"Expected 1 ledger entry for 2PWO, got {len(entries)}")
 		self.assertEqual(flt(entries[0].leaves), 2.0, f"Expected 2.0 Comp Off for 2PWO, got {flt(entries[0].leaves)}")
 		self.assertEqual(entries[0].transaction_type, "Leave Allocation")

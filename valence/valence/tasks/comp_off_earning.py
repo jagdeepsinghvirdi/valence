@@ -67,7 +67,7 @@ def get_comp_off_earned(attendance, context=None):
 	return _match_comp_off_rule(code, rules, enabled_setting=comp_off_enabled)
 
 
-def get_attendance_comp_off_entries(attendance_name, employee=None, attendance_date=None, leave_type=None):
+def get_attendance_comp_off_entries(attendance_name, leave_type=None):
 	"""
 	Query submitted Leave Ledger Entries belonging specifically to this Attendance.
 	Uses custom_attendance reference on Leave Ledger Entry for exact identity isolation.
@@ -121,11 +121,7 @@ def process_comp_off_for_attendance(attendance_name):
 
 	new_earning = get_comp_off_earned(att)
 
-	existing_entries = get_attendance_comp_off_entries(
-		att.name,
-		employee=att.employee,
-		attendance_date=att.attendance_date,
-	)
+	existing_entries = get_attendance_comp_off_entries(att.name)
 	net_credited = sum(flt(e.leaves) for e in existing_entries)
 
 	if net_credited == new_earning:
@@ -217,11 +213,7 @@ def reverse_comp_off_for_attendance(attendance_name):
 	# Concurrency protection: lock Attendance record (mirrors process_comp_off_for_attendance)
 	frappe.db.sql("SELECT name FROM `tabAttendance` WHERE name = %s FOR UPDATE", (att.name,))
 
-	existing_entries = get_attendance_comp_off_entries(
-		att.name,
-		employee=att.employee,
-		attendance_date=att.attendance_date,
-	)
+	existing_entries = get_attendance_comp_off_entries(att.name)
 	net_credited = sum(flt(e.leaves) for e in existing_entries)
 	if net_credited <= 0:
 		return
@@ -294,9 +286,21 @@ def run_daily_comp_off_earning():
 	return process_comp_off_earning(from_date=yesterday, to_date=yesterday)
 
 
+def process_attendance_offdays_and_comp_off():
+	"""
+	Scheduled daily workflow wrapper.
+	Explicitly guarantees that Attendance off-day resolution runs and finishes
+	BEFORE Comp Off daily earning processes yesterday's attendance records.
+	"""
+	from valence.valence.doc_events.attendance import process_attendance_offdays
+
+	process_attendance_offdays()
+	return run_daily_comp_off_earning()
+
+
 def run():
 	"""Manual entry point for bench execute."""
-	return run_daily_comp_off_earning()
+	return process_attendance_offdays_and_comp_off()
 
 
 def on_attendance_submit(doc, method=None):

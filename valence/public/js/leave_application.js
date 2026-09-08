@@ -41,6 +41,11 @@ frappe.ui.form.on("Leave Application", {
 
 	employee(frm) {
 		frm.trigger("restrict_leave_types_for_resign");
+		frm.trigger("leave_type");
+	},
+
+	from_date(frm) {
+		frm.trigger("leave_type");
 	},
 
 	make_dashboard(frm) {
@@ -48,6 +53,8 @@ frappe.ui.form.on("Leave Application", {
 	},
 
 	leave_type(frm) {
+		frm.set_intro("");
+
 		if (!frm.doc.leave_type || !frm.doc.employee) {
 			return;
 		}

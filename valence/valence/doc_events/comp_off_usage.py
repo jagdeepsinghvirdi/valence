@@ -3,12 +3,11 @@
 Notes:
 - Comp Off balance must always come from HRMS's get_leave_balance_on() — never a custom calculation.
 - Comp Off earning is automatic (from qualifying double-shift work), so employees cannot apply for unearned Comp Off — this must be blocked.
-- run() is a scheduled job entry point (not manually triggered).
 """
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import flt
 
 from hrms.hr.doctype.leave_application.leave_application import get_leave_balance_on
 
@@ -25,12 +24,14 @@ def validate_comp_off_application(doc, method=None):
 	that the requested Comp Off days do not exceed the available balance
 	obtained from HRMS's get_leave_balance_on().
 	"""
-	from frappe import _
 	from frappe.utils import add_days, cint, getdate
 	from valence.api import get_day_type
 
 	comp_off_leave_type = get_comp_off_leave_type()
-	if not comp_off_leave_type or doc.leave_type != comp_off_leave_type:
+	if not comp_off_leave_type:
+		frappe.throw(_("Comp Off Leave Type is not configured in Attendance Settings"))
+
+	if doc.leave_type != comp_off_leave_type:
 		return
 
 	if not doc.employee or not doc.from_date or not doc.to_date:
@@ -57,6 +58,9 @@ def validate_comp_off_application(doc, method=None):
 
 	eligible_requested_amount = flt(eligible_requested_amount, 1)
 
+	if flt(doc.total_leave_days) != eligible_requested_amount:
+		doc.total_leave_days = eligible_requested_amount
+
 	available_balance = flt(get_comp_off_balance(doc.employee, doc.from_date))
 
 	if eligible_requested_amount > available_balance or available_balance < 0:
@@ -78,10 +82,13 @@ def get_comp_off_balance(employee, on_date=None):
 	if not frappe.db.exists("Employee", employee):
 		frappe.throw(_("Employee {0} does not exist.").format(employee))
 
+	leave_type = get_comp_off_leave_type()
+	if not leave_type:
+		frappe.throw(_("Comp Off Leave Type is not configured in Attendance Settings"))
+
 	if not on_date:
 		on_date = frappe.utils.nowdate()
 
-	leave_type = get_comp_off_leave_type()
 	return get_leave_balance_on(employee, leave_type, on_date)
 
 
@@ -98,7 +105,8 @@ def get_comp_off_statement(employee, from_date, to_date):
 			"employee": employee,
 			"leave_type": leave_type,
 			"docstatus": 1,
-			"from_date": ["between", [from_date, to_date]],
+			"from_date": ["<=", to_date],
+			"to_date": [">=", from_date],
 		},
 		fields=[
 			"name",
@@ -125,11 +133,3 @@ def get_comp_off_statement(employee, from_date, to_date):
 		statement.append(row)
 
 	return statement
-
-
-def run():
-	"""Scheduled job entry point for Comp Off usage processing.
-
-	This is a scheduled background task and is not intended to be triggered manually.
-	"""
-	pass

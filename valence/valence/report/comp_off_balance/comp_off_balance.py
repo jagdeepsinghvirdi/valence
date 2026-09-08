@@ -2,10 +2,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_year_start, getdate, nowdate
 
-from valence.valence.doc_events.comp_off_usage import (
-	get_comp_off_balance,
-	get_comp_off_statement,
-)
+from valence.valence.doc_events.comp_off_usage import get_comp_off_leave_type
 from valence.valence.override.query import (
 	_employee_for_user,
 	_has_unrestricted_leave_access,
@@ -81,13 +78,58 @@ def get_data(filters):
 	as_on_date = to_date
 
 	employees = get_employees(filters)
-	data = []
+	if not employees:
+		return []
 
+	leave_type = get_comp_off_leave_type()
+	if not leave_type:
+		return []
+
+	employee_names = [emp.name for emp in employees]
+	period_from = getdate(from_date)
+
+	entries = frappe.get_all(
+		"Leave Ledger Entry",
+		filters={
+			"employee": ["in", employee_names],
+			"leave_type": leave_type,
+			"docstatus": 1,
+			"from_date": ["<=", to_date],
+		},
+		fields=[
+			"employee",
+			"from_date",
+			"to_date",
+			"leaves",
+		],
+		order_by="from_date asc, creation asc",
+	)
+
+	entries_by_employee = {}
+	for entry in entries:
+		entries_by_employee.setdefault(entry.employee, []).append(entry)
+
+	data = []
 	for emp in employees:
-		statement = get_comp_off_statement(emp.name, from_date, to_date)
-		earned = sum(flt(entry.get("earned")) for entry in statement)
-		consumed = sum(flt(entry.get("consumed")) for entry in statement)
-		balance = flt(get_comp_off_balance(emp.name, on_date=to_date))
+		emp_entries = entries_by_employee.get(emp.name, [])
+		earned = 0.0
+		consumed = 0.0
+		balance = 0.0
+
+		for entry in emp_entries:
+			leaves = flt(entry.get("leaves"))
+			balance += leaves
+
+			entry_to = getdate(entry.get("to_date")) if entry.get("to_date") else getdate(entry.get("from_date"))
+			if entry_to >= period_from:
+				if leaves > 0:
+					earned += leaves
+				elif leaves < 0:
+					consumed += abs(leaves)
+
+		earned = flt(earned, 2)
+		consumed = flt(consumed, 2)
+		balance = flt(balance, 2)
 		ot = flt(earned - consumed, 2)
 
 		data.append({
@@ -116,7 +158,7 @@ def get_employees(filters):
 	if filters.get("status"):
 		conditions["status"] = filters.get("status")
 
-	scope = get_permitted_employees(filters)
+	scope = get_permitted_employees()
 	if scope is not None:
 		if not scope:
 			return []
@@ -135,7 +177,7 @@ def get_employees(filters):
 	)
 
 
-def get_permitted_employees(filters):
+def get_permitted_employees():
 	user = frappe.session.user
 
 	if _has_unrestricted_leave_access(user):

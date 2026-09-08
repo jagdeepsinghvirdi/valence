@@ -12,6 +12,7 @@ from valence.valence.doc_events.attendance import (
 	get_offday_full_day_hours,
 	get_shift_duration_hours,
 	get_shift_midpoint,
+	get_shift_start,
 	get_worked_half,
 )
 from valence.valence.override.query import (
@@ -44,7 +45,6 @@ ATTENDANCE_FIELDS = (
 )
 
 EMPLOYEE_COLUMNS = (
-	("sr_no", "S.No", "Int", None, 60),
 	("employee", "E-Code", "Link", "Employee", 110),
 	("employee_name", "Name", "Data", None, 180),
 	("department_label", "Department", "Data", None, 140),
@@ -130,6 +130,69 @@ def execute(filters=None):
 	return columns, data
 
 
+@frappe.whitelist()
+def get_attendance_code_legend():
+	from valence.valence.attendance_code import (
+		HOLIDAY_CODES,
+		LEAVE_CODES,
+		NORMAL_CODES,
+		ON_DUTY_CODE,
+		WEEKLY_OFF_CODES,
+	)
+
+	meanings = {
+		"P": _("Present"),
+		"A": _("Absent"),
+		MISPUNCH_CODE: _("Mispunch"),
+		ON_DUTY_CODE: _("On Duty"),
+		"2P": _("Double Present"),
+		"2P/A": _("Double Shift Half Day"),
+		"WO": _("Weekly Off"),
+		"PWO": _("Present on Weekly Off"),
+		"PAW": _("Half Day Present on Weekly Off"),
+		"2PWO": _("Double Present on Weekly Off"),
+		"2PAW": _("Double Shift Half Day on Weekly Off"),
+		"H": _("Holiday"),
+		"HP": _("Present on Holiday"),
+		"HP/A": _("Half Day Present on Holiday"),
+		"2HP": _("Double Present on Holiday"),
+		"2HP/A": _("Double Shift Half Day on Holiday"),
+		"EL": _("Earned Leave"),
+		"PL": _("Privilege Leave"),
+		"CL": _("Casual Leave"),
+		"SL": _("Sick Leave"),
+		"L": _("Leave Without Pay"),
+		"CO": _("Compensatory Off"),
+	}
+
+	codes = []
+	for source in (NORMAL_CODES, WEEKLY_OFF_CODES, HOLIDAY_CODES):
+		for key, value in source.items():
+			if isinstance(value, str) and value not in codes:
+				codes.append(value)
+	for value in LEAVE_CODES.values():
+		if value not in codes:
+			codes.append(value)
+	for value in (ABSENT_CODE, MISPUNCH_CODE, ON_DUTY_CODE):
+		if value not in codes:
+			codes.append(value)
+
+	items = []
+	for code in codes:
+		label = meanings.get(code, code)
+		items.append(
+			'<span style="display:inline-block;margin:2px 10px 2px 0;white-space:nowrap">'
+			'<b>{0}</b> &ndash; {1}</span>'.format(frappe.utils.escape_html(code), label)
+		)
+
+	items.append(
+		'<span style="display:inline-block;margin:2px 10px 2px 0;white-space:nowrap">'
+		'<b>X/Y</b> &ndash; {0}</span>'.format(_("First half / second half"))
+	)
+
+	return "".join(items)
+
+
 def get_period(filters):
 	today = getdate()
 	month = cint(filters.get("month")) or today.month
@@ -211,9 +274,13 @@ def get_employees(filters, start, end):
 	if scope is not None:
 		if not scope:
 			return []
+		requested = conditions.get("name")
+		if requested and not isinstance(requested, list):
+			if requested not in scope:
+				return []
 		conditions["name"] = ["in", scope]
 
-	rows = frappe.get_list(
+	rows = frappe.get_all(
 		"Employee",
 		filters=conditions,
 		or_filters=[
@@ -265,18 +332,45 @@ def get_permitted_employees(filters):
 
 	employee = _employee_for_user(user)
 
+	scope = set()
+	if employee and employee.get("name"):
+		scope.add(employee.name)
+
 	if _is_hod(user) and employee and employee.get("department"):
 		departments = get_department_descendants(employee.department)
-		rows = frappe.get_all(
-			"Employee",
-			filters={"department": ["in", departments]},
-			pluck="name",
+		scope.update(
+			frappe.get_all("Employee", filters={"department": ["in", departments]}, pluck="name")
 		)
-		if employee.get("name") and employee.name not in rows:
-			rows.append(employee.name)
-		return rows
 
-	return [employee.name] if employee and employee.get("name") else []
+	scope.update(get_reporting_employees(user))
+
+	return sorted(scope)
+
+
+def get_reporting_employees(user):
+	"""Employees this user is responsible for, using the existing approver relationships."""
+	names = set()
+
+	if frappe.db.has_column("Employee", "leave_approver"):
+		names.update(
+			frappe.get_all("Employee", filters={"leave_approver": user}, pluck="name")
+		)
+
+	if frappe.db.exists("DocType", "Department Approver"):
+		departments = frappe.get_all(
+			"Department Approver",
+			filters={"approver": user, "parentfield": "leave_approvers"},
+			pluck="parent",
+		)
+		if departments:
+			expanded = set()
+			for department in departments:
+				expanded.update(get_department_descendants(department))
+			names.update(
+				frappe.get_all("Employee", filters={"department": ["in", list(expanded)]}, pluck="name")
+			)
+
+	return names
 
 
 def get_department_descendants(department):
@@ -407,6 +501,7 @@ def build_shift_cache(attendance_map):
 		cache[shift] = {
 			"duration": get_shift_duration_hours(shift),
 			"midpoint": get_shift_midpoint(shift),
+			"start": get_shift_start(shift),
 		}
 	return cache
 
@@ -456,6 +551,7 @@ def resolve_code(record, day_type, shift_cache, request_reasons, full_day_hours)
 			record.get("in_time"),
 			record.get("out_time"),
 			midpoint=shift.get("midpoint"),
+			shift_start=shift.get("start"),
 		),
 		"request_reason": request_reasons.get(record.get("attendance_request")),
 	}
@@ -490,7 +586,6 @@ def get_remarks(employees, filters):
 
 def build_employee_row(index, employee):
 	return {
-		"sr_no": index,
 		"employee": employee.name,
 		"employee_name": employee.get("employee_name"),
 		"department_label": employee.get("department_label"),

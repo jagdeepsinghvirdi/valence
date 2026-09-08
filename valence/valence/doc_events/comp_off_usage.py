@@ -28,10 +28,7 @@ def validate_comp_off_application(doc, method=None):
 	from valence.api import get_day_type
 
 	comp_off_leave_type = get_comp_off_leave_type()
-	if not comp_off_leave_type:
-		frappe.throw(_("Comp Off Leave Type is not configured in Attendance Settings"))
-
-	if doc.leave_type != comp_off_leave_type:
+	if not comp_off_leave_type or doc.leave_type != comp_off_leave_type:
 		return
 
 	if not doc.employee or not doc.from_date or not doc.to_date:
@@ -90,6 +87,28 @@ def get_comp_off_balance(employee, on_date=None):
 		on_date = frappe.utils.nowdate()
 
 	return get_leave_balance_on(employee, leave_type, on_date)
+
+
+@frappe.whitelist()
+def get_comp_off_balance_for_leave_type(employee, leave_type, on_date=None):
+	"""
+	Balance for the Leave Application banner.
+
+	Reads the configured Comp Off Leave Type server-side so employees without
+	Attendance Settings permission are not blocked. Returns None when the
+	selected leave type is not Comp Off.
+	"""
+	if not employee or not leave_type:
+		return None
+
+	comp_off_leave_type = get_comp_off_leave_type()
+	if not comp_off_leave_type or leave_type != comp_off_leave_type:
+		return None
+
+	if not frappe.db.exists("Employee", employee):
+		return None
+
+	return get_comp_off_balance(employee, on_date)
 
 
 def get_comp_off_statement(employee, from_date, to_date):

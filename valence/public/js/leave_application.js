@@ -19,9 +19,15 @@ frappe.ui.form.on("Leave Application", {
 
 			frm.save()
 				.then(() => frm.script_manager.trigger("before_workflow_action"))
-				.then(() =>
+				.then(() => {
+					if (frm.is_new() || !frm.doc.name || frm.doc.__islocal) {
+						return Promise.reject(new Error("not-saved"));
+					}
+					return frappe.db.get_doc(frm.doctype, frm.doc.name);
+				})
+				.then((doc) =>
 					frappe.xcall("frappe.model.workflow.apply_workflow", {
-						doc: frm.doc,
+						doc: doc,
 						action: "Apply",
 					})
 				)
@@ -59,21 +65,18 @@ frappe.ui.form.on("Leave Application", {
 			return;
 		}
 
-		frappe.db.get_single_value("Attendance Settings", "comp_off_leave_type").then((comp_off_type) => {
-			if (comp_off_type && frm.doc.leave_type === comp_off_type) {
-				frappe.call({
-					method: "valence.valence.doc_events.comp_off_usage.get_comp_off_balance",
-					args: {
-						employee: frm.doc.employee,
-						on_date: frm.doc.from_date,
-					},
-					callback(r) {
-						if (r.message !== undefined && r.message !== null) {
-							frm.set_intro(__("Available Comp Off Balance: {0} days", [r.message]), "blue");
-						}
-					},
-				});
-			}
+		frappe.call({
+			method: "valence.valence.doc_events.comp_off_usage.get_comp_off_balance_for_leave_type",
+			args: {
+				employee: frm.doc.employee,
+				leave_type: frm.doc.leave_type,
+				on_date: frm.doc.from_date,
+			},
+			callback(r) {
+				if (r.message !== undefined && r.message !== null) {
+					frm.set_intro(__("Available Comp Off Balance: {0} days", [r.message]), "blue");
+				}
+			},
 		});
 	},
 

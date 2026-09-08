@@ -26,6 +26,7 @@ frappe.ui.form.on('Attendance', {
             });
         });
 
+        valence_bind_connection_actions(frm);
         frm.trigger("show_leave_connections");
     },
 
@@ -44,7 +45,6 @@ frappe.ui.form.on('Attendance', {
                 const data = r.message || {};
                 const leaves = data.leave_applications || [];
                 const short_leaves = data.short_leave_applications || [];
-                const shifts = data.shift_assignments || [];
 
                 const render = (doctype, rows, subtitle_field) => {
                     if (!rows.length) {
@@ -60,19 +60,19 @@ frappe.ui.form.on('Attendance', {
                     }).join("");
                 };
 
+                const add_btn = (doctype) =>
+                    `<button type="button" class="btn btn-xs btn-default valence-conn-add" data-doctype="${doctype}"
+                        style="margin-left:6px;padding:0 6px;line-height:1.4">+</button>`;
+
                 const html = `
                     <div class="valence-leave-connections row">
-                        <div class="col-sm-4">
-                            <h6>${__("Leave Application")}</h6>
+                        <div class="col-sm-6">
+                            <h6>${__("Leave Application")}${add_btn("Leave Application")}</h6>
                             ${render("Leave Application", leaves, "leave_type")}
                         </div>
-                        <div class="col-sm-4">
-                            <h6>${__("Short Leave")}</h6>
+                        <div class="col-sm-6">
+                            <h6>${__("Short Leave")}${add_btn("Short Leave Application")}</h6>
                             ${render("Short Leave Application", short_leaves, "short_leave_type")}
-                        </div>
-                        <div class="col-sm-4">
-                            <h6>${__("Shift Assignment")}</h6>
-                            ${render("Shift Assignment", shifts, "shift_type")}
                         </div>
                     </div>
                 `;
@@ -83,10 +83,12 @@ frappe.ui.form.on('Attendance', {
                     }
 
                     if (frm.dashboard && typeof frm.dashboard.add_section === "function") {
-                        frm.dashboard.add_section(html, __("Leave / Shift Connections"));
+                        frm.dashboard.add_section(html, __("Leave Connections"));
                     } else if (frm.dashboard && frm.dashboard.wrapper) {
                         $(frm.dashboard.wrapper).append(html);
                     }
+
+                    valence_bind_connection_actions(frm);
                 } catch (e) {
                     console.error("Valence: could not render attendance connections", e);
                 }
@@ -94,3 +96,33 @@ frappe.ui.form.on('Attendance', {
         });
     }
 });
+
+function valence_new_attendance_linked_doc(frm, doctype) {
+    const date = frm.doc.attendance_date;
+    const values = {
+        employee: frm.doc.employee,
+        company: frm.doc.company,
+    };
+
+    if (doctype === "Leave Application") {
+        values.from_date = date;
+        values.to_date = date;
+    } else if (doctype === "Short Leave Application") {
+        values.date = date;
+    }
+
+    frappe.new_doc(doctype, values);
+}
+
+function valence_bind_connection_actions(frm) {
+    if (frm.__valence_conn_bound) {
+        return;
+    }
+    frm.__valence_conn_bound = true;
+
+    $(frm.wrapper).on("click", ".valence-conn-add", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        valence_new_attendance_linked_doc(frm, $(this).attr("data-doctype"));
+    });
+}

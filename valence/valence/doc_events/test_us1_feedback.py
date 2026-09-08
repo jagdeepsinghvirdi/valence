@@ -62,7 +62,20 @@ def run():
 	print("")
 	print("-- A. Attendance half day " + "-" * 46)
 
-	shift = SHIFT_NAME if frappe.db.exists("Shift Type", SHIFT_NAME) else None
+	if not frappe.db.exists("Shift Type", SHIFT_NAME):
+		st = frappe.new_doc("Shift Type")
+		st.name = SHIFT_NAME
+		st.start_time = "09:00:00"
+		st.end_time = "17:00:00"
+		st.working_hours_threshold_for_half_day = 5.0
+		st.working_hours_threshold_for_absent = 0.0
+		st.flags.ignore_permissions = True
+		st.flags.ignore_validate = True
+		st.flags.ignore_mandatory = True
+		st.insert()
+	else:
+		frappe.db.set_value("Shift Type", SHIFT_NAME, "working_hours_threshold_for_half_day", 5.0)
+	shift = SHIFT_NAME
 	if not shift:
 		ok(
 			"Shift Type available",
@@ -196,7 +209,11 @@ def run():
 	empty = get_attendance_connections(None, None)
 	ok(
 		"Connections API tolerates missing arguments",
-		empty == {"leave_applications": [], "short_leave_applications": []},
+		empty == {
+			"leave_applications": [],
+			"short_leave_applications": [],
+			"shift_assignments": [],
+		},
 		str(empty),
 	)
 	ok(

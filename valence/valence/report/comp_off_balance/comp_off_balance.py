@@ -2,7 +2,10 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_year_start, getdate, nowdate
 
-from valence.valence.doc_events.comp_off_usage import get_comp_off_leave_type
+from valence.valence.doc_events.comp_off_usage import (
+	get_comp_off_balance,
+	get_comp_off_leave_type,
+)
 from valence.valence.override.query import (
 	_employee_for_user,
 	_has_unrestricted_leave_access,
@@ -114,11 +117,9 @@ def get_data(filters):
 		emp_entries = entries_by_employee.get(emp.name, [])
 		earned = 0.0
 		consumed = 0.0
-		balance = 0.0
 
 		for entry in emp_entries:
 			leaves = flt(entry.get("leaves"))
-			balance += leaves
 
 			entry_to = getdate(entry.get("to_date")) if entry.get("to_date") else getdate(entry.get("from_date"))
 			if entry_to >= period_from:
@@ -129,7 +130,7 @@ def get_data(filters):
 
 		earned = flt(earned, 2)
 		consumed = flt(consumed, 2)
-		balance = flt(balance, 2)
+		balance = flt(get_comp_off_balance(emp.name, on_date=to_date), 2)
 		ot = flt(earned - consumed, 2)
 
 		data.append({

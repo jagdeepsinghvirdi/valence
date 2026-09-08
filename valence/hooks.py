@@ -161,6 +161,7 @@ override_doctype_class = {
 	"Stock Entry":"valence.valence.override.stock_entry.StockEntry",
 	"Batch":"valence.valence.override.batch.Batch",
 	"Sales Invoice":"valence.valence.override.sales_invoice.SalesInvoice",
+	"Shift Assignment":"valence.valence.override.shift_assignment.ShiftAssignment",
 	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
 	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",

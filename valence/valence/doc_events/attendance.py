@@ -134,13 +134,14 @@ def _apply_hours_status(attendance, hours, shift_name):
 	attendance.db_set("working_hours", hours)
 
 	if not shift_name:
+		attendance.db_set("status", "Present" if hours > 0 else "Absent")
 		return
 
 	shift = frappe.get_doc("Shift Type", shift_name)
 	half_day_threshold = shift.working_hours_threshold_for_half_day or 0
 	absent_threshold = shift.working_hours_threshold_for_absent or 0
 
-	if hours < absent_threshold:
+	if hours <= 0 or hours < absent_threshold:
 		attendance.db_set("status", "Absent")
 	elif hours < half_day_threshold:
 		attendance.db_set("status", "Half Day")
@@ -196,12 +197,11 @@ def get_worked_half(shift_name, in_time, out_time, midpoint=None, shift_start=No
 
 	in_td = timedelta(hours=in_dt.hour, minutes=in_dt.minute, seconds=in_dt.second)
 	out_td = timedelta(hours=out_dt.hour, minutes=out_dt.minute, seconds=out_dt.second)
-
-	if shift_start is not None and in_td < shift_start:
-		in_td += timedelta(hours=24)
+	if out_td < in_td:
 		out_td += timedelta(hours=24)
 
-	if out_td < in_td:
+	if midpoint >= timedelta(hours=24) and in_td < (midpoint - timedelta(hours=12)):
+		in_td += timedelta(hours=24)
 		out_td += timedelta(hours=24)
 
 	before = max(0.0, (min(out_td, midpoint) - in_td).total_seconds())
@@ -283,6 +283,9 @@ def set_status(self, method):
 
 	day_type = get_day_type(self.employee, self.attendance_date)
 
+	if not self.in_time and not self.out_time and self.status in ("Work From Home", "On Duty", "On Leave"):
+		return
+
 	if not self.in_time and self.out_time:
 		self.db_set("status", "Mispunch")
 	elif not self.out_time and self.in_time:
@@ -304,9 +307,6 @@ def set_status(self, method):
 			self.db_set("working_hours", hours)
 			self.db_set("status", "Present")
 		else:
-			shift_len = get_shift_duration_hours(shift)
-			if shift_len and hours > shift_len:
-				hours = shift_len
 			_apply_hours_status(self, hours, shift)
 
 
@@ -663,6 +663,15 @@ def process_attendance_offdays():
 
 def resolve_no_punch_status(employee, attendance_date, attendance):
     from valence.api import get_day_type
+
+    current = frappe.db.get_value(
+        "Attendance", attendance, ["status", "leave_application", "attendance_request"], as_dict=True
+    )
+    if current:
+        if current.leave_application or current.status == "On Leave":
+            return current.status or "On Leave"
+        if current.attendance_request or current.status in ("Work From Home", "On Duty"):
+            return current.status
 
     status = get_day_type(employee, attendance_date) or "Absent"
 

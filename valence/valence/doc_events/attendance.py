@@ -173,7 +173,14 @@ def get_shift_midpoint(shift_name):
 	return start + timedelta(seconds=span / 2)
 
 
-def get_worked_half(shift_name, in_time, out_time, midpoint=None):
+def get_shift_start(shift_name):
+	if not shift_name:
+		return None
+	start_time = frappe.db.get_value("Shift Type", shift_name, "start_time")
+	return _as_timedelta(start_time)
+
+
+def get_worked_half(shift_name, in_time, out_time, midpoint=None, shift_start=None):
 	if midpoint is None:
 		midpoint = get_shift_midpoint(shift_name)
 	if not midpoint:
@@ -184,8 +191,16 @@ def get_worked_half(shift_name, in_time, out_time, midpoint=None):
 	if not in_dt or not out_dt:
 		return None
 
+	if shift_start is None:
+		shift_start = get_shift_start(shift_name)
+
 	in_td = timedelta(hours=in_dt.hour, minutes=in_dt.minute, seconds=in_dt.second)
 	out_td = timedelta(hours=out_dt.hour, minutes=out_dt.minute, seconds=out_dt.second)
+
+	if shift_start is not None and in_td < shift_start:
+		in_td += timedelta(hours=24)
+		out_td += timedelta(hours=24)
+
 	if out_td < in_td:
 		out_td += timedelta(hours=24)
 
@@ -255,7 +270,11 @@ def _measured_hours(doc):
 
 
 def set_status(self, method):
-	from valence.api import get_day_type
+	from valence.api import get_applicable_shift, get_day_type
+
+	shift = get_applicable_shift(self.employee, self.attendance_date) or self.shift
+	if shift and self.shift != shift:
+		self.db_set("shift", shift)
 
 	request_status = get_attendance_request_status(self)
 	if request_status:
@@ -273,7 +292,7 @@ def set_status(self, method):
 		# so approved Short Leave is not dropped as "No punch".
 		short_leave_hours = get_approved_short_leave_hours(self.employee, self.attendance_date)
 		if short_leave_hours:
-			_apply_hours_status(self, short_leave_hours, self.shift)
+			_apply_hours_status(self, short_leave_hours, shift)
 		elif day_type:
 			self.db_set("status", day_type)
 		else:
@@ -285,10 +304,10 @@ def set_status(self, method):
 			self.db_set("working_hours", hours)
 			self.db_set("status", "Present")
 		else:
-			shift_len = get_shift_duration_hours(self.shift)
+			shift_len = get_shift_duration_hours(shift)
 			if shift_len and hours > shift_len:
 				hours = shift_len
-			_apply_hours_status(self, hours, self.shift)
+			_apply_hours_status(self, hours, shift)
 
 
 def set_short_leave_count(self, method):

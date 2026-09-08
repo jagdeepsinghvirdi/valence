@@ -161,6 +161,7 @@ override_doctype_class = {
 	"Stock Entry":"valence.valence.override.stock_entry.StockEntry",
 	"Batch":"valence.valence.override.batch.Batch",
 	"Sales Invoice":"valence.valence.override.sales_invoice.SalesInvoice",
+	"Shift Assignment":"valence.valence.override.shift_assignment.ShiftAssignment",
 	"Sales Order":"valence.valence.override.sales_order.SalesOrder",
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
 	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
@@ -219,16 +220,22 @@ doc_events = {
   "Attendance":{
       "validate":"valence.valence.doc_events.attendance.set_status",
       "after_insert":"valence.valence.doc_events.attendance.set_short_leave_count",
-      "on_update_after_submit": "valence.valence.doc_events.attendance.set_short_leave_count"
-    #   "on_cancel": "valence.valence.doc_events.attendance.cleanup_related_docs",
-    #   "on_trash": "valence.valence.doc_events.attendance.cleanup_related_docs"      
+      "on_submit": "valence.valence.tasks.comp_off_earning.on_attendance_submit",
+      "on_update_after_submit": [
+          "valence.valence.doc_events.attendance.set_short_leave_count",
+          "valence.valence.tasks.comp_off_earning.on_attendance_update_after_submit"
+      ],
+      "on_cancel": "valence.valence.tasks.comp_off_earning.on_attendance_cancel"
   },
   "Shift Assignment": {
     "validate": "valence.valence.doc_events.shift_assignment.set_weekly_off_from_schedule"
   },
   # Track B leave rules (shared file with Track A #8 — coordinate edits)
   "Leave Application": {
-      "validate": "valence.valence.doc_events.leave_application.validate",
+      "validate": [
+          "valence.valence.doc_events.leave_application.validate",
+          "valence.valence.doc_events.comp_off_usage.validate_comp_off_application",
+      ],
       "before_submit": "valence.valence.doc_events.leave_application.before_submit",
       "on_update": "valence.valence.doc_events.leave_application.on_update",
   },
@@ -273,7 +280,7 @@ scheduler_events = {
     "cron": {
         "0 0 * * *": [
             "valence.valence.doc_events.quality_inspection.create_qc_for_retest_batches",
-            "valence.valence.doc_events.attendance.process_attendance_offdays"
+            "valence.valence.tasks.comp_off_earning.process_attendance_offdays_and_comp_off"
         ],
         "0 4 * * THU": [
 			"valence.api.sales_invoice_payment_remainder",

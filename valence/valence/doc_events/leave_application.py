@@ -127,49 +127,22 @@ def count_working_leave_days(employee, from_date, to_date, half_day=0, half_day_
 
 
 def _get_non_working_dates(employee, start, end) -> set:
-	"""Union of holiday-list dates (incl. weekly_off rows) and shift weekly off weekdays."""
-	non_working = set()
+	"""
+	Holidays and weekly offs for the period, resolved per date by the canonical
+	day-type map so leave day counts agree with Attendance, Roster and the Dashboard.
+	"""
+	from valence.api import get_day_type_map
 
-	try:
-		from hrms.hr.utils import get_holiday_dates_for_employee
+	if not employee:
+		return set()
 
-		for d in get_holiday_dates_for_employee(employee, start, end):
-			non_working.add(getdate(d))
-	except Exception:
-		# No holiday list / raise_exception — still apply shift weekly offs below
-		pass
+	day_types = get_day_type_map([employee], start, end)
 
-	# Explicit weekly_off holidays (in case list fetch omitted some)
-	holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
-	if holiday_list:
-		for d in frappe.get_all(
-			"Holiday",
-			filters={
-				"parent": holiday_list,
-				"holiday_date": ["between", [start, end]],
-				"weekly_off": 1,
-			},
-			pluck="holiday_date",
-		):
-			non_working.add(getdate(d))
-
-	# Shift Assignment weekly off weekday (e.g. Sunday)
-	off_weekdays = _get_shift_weekly_off_weekday(employee, start, end)
-	if off_weekdays:
-		current = start
-		while current <= end:
-			if current.strftime("%A").lower() in off_weekdays:
-				non_working.add(current)
-			current = add_days(current, 1)
-
-	return non_working
-
-
-def _get_shift_weekly_off_weekday(employee, start, end):
-	"""Return weekday name from active Shift Assignment.custom_off_day, if any."""
-	from valence.api import get_shift_weekly_off_days
-
-	return get_shift_weekly_off_days(employee, end)
+	return {
+		date
+		for (_employee, date), day_type in day_types.items()
+		if day_type
+	}
 
 
 def validate_leave_creation_window(doc, method=None):
@@ -427,9 +400,13 @@ def share_doc_with_super_hod(doc):
 	"""
 	if not doc.name:
 		return
-	from valence.valence.approval_hierarchy import get_applicant_user, get_hr_users
+	from valence.valence.approval_hierarchy import (
+		get_applicant_user,
+		get_hr_users,
+		get_super_hod_approvers,
+	)
 
-	users = _users_with_roles(["Super HOD", "HR Manager"])
+	users = get_super_hod_approvers(doc.get("employee"))
 	applicant = get_applicant_user(doc.get("employee"))
 	users = [u for u in users if u and u != applicant]
 	# Ensure HR users (excluding applicant) are included
@@ -460,7 +437,15 @@ def share_doc_with_super_hod(doc):
 
 
 def _notify_super_hod_approvers(doc):
-	users = _users_with_roles(["Super HOD", "HR Manager"])
+	from valence.valence.approval_hierarchy import (
+		get_applicant_user,
+		get_hr_users,
+		get_super_hod_approvers,
+	)
+
+	users = get_super_hod_approvers(doc.get("employee"))
+	if not users:
+		users = get_hr_users(exclude_user=get_applicant_user(doc.get("employee")))
 	if not users:
 		return
 

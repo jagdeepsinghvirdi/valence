@@ -131,7 +131,34 @@ frappe.query_reports["Monthly Attendance Dashboard"] = {
 			valence_edit_remark_dialog(report);
 		});
 	},
+
+	after_datatable_render() {
+		valence_render_legend();
+	},
 };
+
+function valence_render_legend() {
+	const wrapper = $(".report-wrapper");
+	if (!wrapper.length || wrapper.find(".valence-att-legend").length) {
+		return;
+	}
+
+	frappe
+		.xcall(
+			"valence.valence.report.monthly_attendance_dashboard.monthly_attendance_dashboard.get_attendance_code_legend"
+		)
+		.then((body) => {
+			if (!body || $(".report-wrapper .valence-att-legend").length) {
+				return;
+			}
+			$(".report-wrapper").append(
+				`<details class="valence-att-legend">
+					<summary>${__("Attendance Codes")}</summary>
+					<div class="valence-att-legend-body">${body}</div>
+				</details>`
+			);
+		});
+}
 
 function valence_inject_styles() {
 	if (document.getElementById("valence-attendance-dashboard-styles")) {
@@ -154,6 +181,39 @@ function valence_inject_styles() {
 		.valence-att-holiday-worked { background:#ede0fb; color:#4a148c; }
 		.valence-att-double { background:#fff0e0; color:#9a3412; }
 		.valence-att-on-duty { background:#e0f2f1; color:#00695c; }
+
+		.report-wrapper .dt-scrollable {
+			max-height: calc(100vh - 220px);
+			overflow-y: auto;
+		}
+		.report-wrapper .dt-header,
+		.report-wrapper .dt-row-header {
+			position: sticky;
+			top: 0;
+			z-index: 5;
+			background: var(--fg-color, #fff);
+		}
+		.report-wrapper .dt-row-header .dt-cell {
+			background: var(--fg-color, #fff);
+		}
+		.valence-att-legend {
+			margin: 10px 0 4px;
+			padding: 6px 10px;
+			border: 1px solid var(--border-color, #e2e2e2);
+			border-radius: 6px;
+			background: var(--fg-color, #fff);
+		}
+		.valence-att-legend > summary {
+			cursor: pointer;
+			font-weight: 600;
+			font-size: 12px;
+			list-style: revert;
+		}
+		.valence-att-legend .valence-att-legend-body {
+			font-size: 11px;
+			line-height: 1.9;
+			padding-top: 6px;
+		}
 	`;
 	document.head.appendChild(style);
 }

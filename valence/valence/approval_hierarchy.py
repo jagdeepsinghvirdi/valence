@@ -326,12 +326,43 @@ def validate_approver_authority(doc, label: str | None = None):
 		)
 
 
+def get_super_hod_approvers(employee: str | None) -> list[str]:
+	"""
+	Second-level approvers for this employee only: employee -> assigned HOD -> that HOD's approver.
+	Never returns every Super HOD in the system.
+	"""
+	hod_user = get_effective_leave_approver(employee)
+	if not hod_user:
+		return []
+
+	hod_employee = frappe.db.get_value("Employee", {"user_id": hod_user}, "name")
+	if not hod_employee:
+		return []
+
+	super_hod_user = get_effective_leave_approver(hod_employee)
+	if not super_hod_user or super_hod_user == hod_user:
+		return []
+
+	applicant = get_applicant_user(employee)
+	if applicant and super_hod_user == applicant:
+		return []
+
+	return [super_hod_user]
+
+
 def get_hod_stage_share_users(employee: str | None) -> list[str]:
 	"""Users who should receive DocShare / ToDo when request enters Pending HOD."""
 	routing = resolve_hod_stage_routing(employee)
 	users = list(routing["users"])
-	# Always keep HR in the loop as full authority (except applicant)
 	applicant = get_applicant_user(employee)
+
+	# The employee's own Super HOD keeps visibility of their hierarchy, without
+	# exposing the request to every Super HOD in the system.
+	for approver in get_super_hod_approvers(employee):
+		if approver and approver != applicant and approver not in users:
+			users.append(approver)
+
+	# Always keep HR in the loop as full authority (except applicant)
 	for hr in get_hr_users(exclude_user=applicant):
 		if hr not in users:
 			users.append(hr)

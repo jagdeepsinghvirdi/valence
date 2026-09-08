@@ -41,10 +41,40 @@ frappe.ui.form.on("Leave Application", {
 
 	employee(frm) {
 		frm.trigger("restrict_leave_types_for_resign");
+		frm.trigger("leave_type");
+	},
+
+	from_date(frm) {
+		frm.trigger("leave_type");
 	},
 
 	make_dashboard(frm) {
 		frm.trigger("restrict_leave_types_for_resign");
+	},
+
+	leave_type(frm) {
+		frm.set_intro("");
+
+		if (!frm.doc.leave_type || !frm.doc.employee) {
+			return;
+		}
+
+		frappe.db.get_single_value("Attendance Settings", "comp_off_leave_type").then((comp_off_type) => {
+			if (comp_off_type && frm.doc.leave_type === comp_off_type) {
+				frappe.call({
+					method: "valence.valence.doc_events.comp_off_usage.get_comp_off_balance",
+					args: {
+						employee: frm.doc.employee,
+						on_date: frm.doc.from_date,
+					},
+					callback(r) {
+						if (r.message !== undefined && r.message !== null) {
+							frm.set_intro(__("Available Comp Off Balance: {0} days", [r.message]), "blue");
+						}
+					},
+				});
+			}
+		});
 	},
 
 	restrict_leave_types_for_resign(frm) {

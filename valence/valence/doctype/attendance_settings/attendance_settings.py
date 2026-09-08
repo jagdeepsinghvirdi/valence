@@ -37,6 +37,19 @@ class AttendanceSettings(Document):
 
 	def validate(self):
 		self.validate_comp_off_settings()
+		self.enforce_comp_off_leave_type_config()
+
+	def enforce_comp_off_leave_type_config(self):
+		if not self.comp_off_enabled or not self.comp_off_leave_type:
+			return
+
+		if not frappe.db.exists("Leave Type", self.comp_off_leave_type):
+			return
+
+		if frappe.db.get_value("Leave Type", self.comp_off_leave_type, "include_holiday"):
+			frappe.db.set_value(
+				"Leave Type", self.comp_off_leave_type, "include_holiday", 0, update_modified=False
+			)
 
 	def validate_comp_off_settings(self):
 		if self.comp_off_enabled and not self.comp_off_leave_type:

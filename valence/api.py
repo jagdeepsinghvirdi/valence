@@ -8,11 +8,45 @@ from valence.valence.doc_events.attendance import set_status
 # from frappe.utils import get_datetime
 # from datetime import timedelta
 
+def get_checkin_window_end(employee, attendance_date, start_date):
+    """
+    End of the check-in search window for an attendance date.
+
+    Day shifts keep the calendar-day window. Overnight shifts (end time earlier than
+    start time) extend into the next day so the out-punch after midnight is found.
+    """
+    default_end = start_date + timedelta(days=1)
+
+    shift = get_applicable_shift(employee, attendance_date)
+    if not shift:
+        return default_end
+
+    times = frappe.db.get_value(
+        "Shift Type",
+        shift,
+        ["start_time", "end_time", "allow_check_out_after_shift_end_time"],
+        as_dict=True,
+    )
+    if not times or times.start_time is None or times.end_time is None:
+        return default_end
+
+    start_delta = times.start_time if isinstance(times.start_time, timedelta) else None
+    end_delta = times.end_time if isinstance(times.end_time, timedelta) else None
+    if start_delta is None or end_delta is None:
+        return default_end
+
+    if end_delta >= start_delta:
+        return default_end
+
+    buffer_minutes = cint(times.allow_check_out_after_shift_end_time) or 60
+    return default_end + end_delta + timedelta(minutes=buffer_minutes)
+
+
 @frappe.whitelist()
 def get_employee_checkin_entries(employee, attendance_date, doc):
     # 1. Convert string date to datetime objects
     start_date = get_datetime(attendance_date)
-    end_date = start_date + timedelta(days=1)
+    end_date = get_checkin_window_end(employee, attendance_date, start_date)
 
     # 2. Fetch first and last check-ins
     in_time_doc = frappe.get_all(
@@ -75,11 +109,7 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
 @frappe.whitelist()
 def get_attendance_connections(employee, attendance_date):
     if not employee or not attendance_date:
-        return {
-            "leave_applications": [],
-            "short_leave_applications": [],
-            "shift_assignments": [],
-        }
+        return {"leave_applications": [], "short_leave_applications": []}
 
     leave_applications = frappe.get_list(
         "Leave Application",
@@ -106,26 +136,9 @@ def get_attendance_connections(employee, attendance_date):
         ignore_permissions=False,
     )
 
-    shift_assignments = frappe.get_list(
-        "Shift Assignment",
-        filters={
-            "employee": employee,
-            "docstatus": 1,
-            "start_date": ["<=", attendance_date],
-        },
-        or_filters=[
-            ["end_date", ">=", attendance_date],
-            ["end_date", "is", "not set"],
-        ],
-        fields=["name", "shift_type", "status"],
-        order_by="start_date desc",
-        ignore_permissions=False,
-    )
-
     return {
         "leave_applications": leave_applications,
         "short_leave_applications": short_leave_applications,
-        "shift_assignments": shift_assignments,
     }
 
 
@@ -164,7 +177,7 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
         date_obj = attendance_date
         start_date = get_datetime(attendance_date)
 
-    end_date = start_date + timedelta(days=1)
+    end_date = get_checkin_window_end(employee, attendance_date, start_date)
 
     # Fetch first check-in
     in_time_doc = frappe.get_all(
@@ -279,11 +292,14 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
 #             frappe.db.commit()
 #         return "Weekly Off"
 
-def get_shift_weekly_off_days(employee, date_obj):
-    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
-        return set()
+def get_applicable_shift_assignment(employee, date_obj):
+    """Single source of truth: the Shift Assignment covering employee/date, or None."""
+    if not employee or not date_obj:
+        return None
 
-    assignments = frappe.get_all(
+    date_obj = getdate(date_obj)
+
+    rows = frappe.get_all(
         "Shift Assignment",
         filters={
             "employee": employee,
@@ -291,17 +307,44 @@ def get_shift_weekly_off_days(employee, date_obj):
             "docstatus": 1,
         },
         or_filters=[["end_date", ">=", date_obj], ["end_date", "is", "not set"]],
-        fields=["custom_off_day"],
-        order_by="start_date desc",
+        fields=["name", "shift_type", "custom_off_day", "start_date", "end_date"],
+        order_by="start_date desc, creation desc",
+        limit_page_length=1,
     )
 
-    for row in assignments:
-        raw = (row.custom_off_day or "").strip()
-        if not raw:
-            continue
-        return {d.strip().lower() for d in raw.split(",") if d.strip()}
+    return rows[0] if rows else None
 
-    return set()
+
+def get_applicable_shift(employee, date_obj):
+    """Applicable Shift Type for employee/date: Shift Assignment first, then default shift."""
+    assignment = get_applicable_shift_assignment(employee, date_obj)
+    if assignment and assignment.get("shift_type"):
+        return assignment.get("shift_type")
+
+    if not employee:
+        return None
+
+    return frappe.db.get_value("Employee", employee, "default_shift")
+
+
+def _weekly_off_days_from_assignment(assignment):
+    if not assignment:
+        return set()
+
+    raw = (assignment.get("custom_off_day") or "").strip()
+    if not raw:
+        return set()
+
+    return {d.strip().lower() for d in raw.split(",") if d.strip()}
+
+
+def get_shift_weekly_off_days(employee, date_obj):
+    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        return set()
+
+    return _weekly_off_days_from_assignment(
+        get_applicable_shift_assignment(employee, date_obj)
+    )
 
 
 def get_day_type_map(employees, start_date, end_date):
@@ -315,12 +358,20 @@ def get_day_type_map(employees, start_date, end_date):
     end = getdate(end_date)
 
     holiday_lists = {}
+    company_defaults = {}
     for row in frappe.get_all(
         "Employee",
         filters={"name": ["in", employees]},
-        fields=["name", "holiday_list"],
+        fields=["name", "holiday_list", "company"],
     ):
-        holiday_lists[row.name] = row.holiday_list
+        holiday_list = row.holiday_list
+        if not holiday_list and row.company:
+            if row.company not in company_defaults:
+                company_defaults[row.company] = frappe.db.get_value(
+                    "Company", row.company, "default_holiday_list"
+                )
+            holiday_list = company_defaults[row.company]
+        holiday_lists[row.name] = holiday_list
 
     distinct_lists = sorted({hl for hl in holiday_lists.values() if hl})
     holidays = {}
@@ -357,10 +408,7 @@ def get_day_type_map(employees, start_date, end_date):
                 continue
             if row.end_date and getdate(row.end_date) < date_obj:
                 continue
-            raw = (row.custom_off_day or "").strip()
-            if not raw:
-                continue
-            return {d.strip().lower() for d in raw.split(",") if d.strip()}
+            return _weekly_off_days_from_assignment(row)
         return set()
 
     result = {}
@@ -386,7 +434,9 @@ def get_day_type(employee, attendance_date):
 
     date_obj = getdate(attendance_date)
 
-    holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+    from erpnext.setup.doctype.employee.employee import get_holiday_list_for_employee
+
+    holiday_list = get_holiday_list_for_employee(employee, raise_exception=False)
 
     if holiday_list:
         holiday = frappe.db.get_value(

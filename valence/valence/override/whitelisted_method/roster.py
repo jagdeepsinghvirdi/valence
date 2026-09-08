@@ -15,8 +15,8 @@ def get_events(month_start, month_end, employee_filters, shift_filters):
 
 def get_weekly_offs(month_start, month_end, employee_filters):
     """
-    Same source of truth as valence.api.get_offday_status:
-    Holiday List's weekly_off flag, then Shift Assignment.weekly_off_days.
+    Same source of truth as valence.api.get_day_type / get_day_type_map:
+    Holiday List's weekly_off flag, then Shift Assignment.custom_off_day.
     Keeps Roster, Attendance, and the classic calendar all in agreement.
     """
     Employee = frappe.qb.DocType("Employee")
@@ -28,25 +28,18 @@ def get_weekly_offs(month_start, month_end, employee_filters):
     start, end = getdate(month_start), getdate(month_end)
     weekly_offs = {}
 
-    from valence.api import get_shift_weekly_off_days
+    from valence.api import get_day_type_map
+
+    emp_names = [emp.name for emp in employees if emp.get("name")]
+    day_types = get_day_type_map(emp_names, start, end)
 
     for emp in employees:
-        off_weekdays = get_shift_weekly_off_days(emp.name, end)
-
-        holiday_weekly_off_dates = set()
-        if emp.holiday_list:
-            for h in frappe.get_all(
-                "Holiday",
-                filters={"parent": emp.holiday_list, "holiday_date": ["between", [start, end]], "weekly_off": 1},
-                pluck="holiday_date",
-            ):
-                holiday_weekly_off_dates.add(getdate(h))
-
+        emp_name = emp.name
         date = start
         while date <= end:
-            if date in holiday_weekly_off_dates or date.strftime("%A").lower() in off_weekdays:
-                weekly_offs.setdefault(emp.name, []).append({
-                    "holiday": f"weekly-off-{emp.name}-{date}",
+            if day_types.get((emp_name, date)) == "Weekly Off":
+                weekly_offs.setdefault(emp_name, []).append({
+                    "holiday": f"weekly-off-{emp_name}-{date}",
                     "holiday_date": str(date),
                     "description": "Weekly Off",
                     "weekly_off": 1,

@@ -8,11 +8,145 @@ from valence.valence.doc_events.attendance import set_status
 # from frappe.utils import get_datetime
 # from datetime import timedelta
 
+def _as_timedelta(value):
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return value
+    if hasattr(value, "hour"):
+        return timedelta(hours=value.hour, minutes=value.minute, seconds=getattr(value, "second", 0) or 0)
+    return None
+
+
+def _is_overnight_shift(shift_name):
+    if not shift_name:
+        return False
+    times = frappe.db.get_value("Shift Type", shift_name, ["start_time", "end_time"])
+    if not times or not times[0] or not times[1]:
+        return False
+    start = _as_timedelta(times[0])
+    end = _as_timedelta(times[1])
+    if not start or not end:
+        return False
+    return (end - start).total_seconds() < 0
+
+
+def _get_shift_punch_window(shift_name, attendance_date):
+    """
+    Computes (start_datetime, end_datetime) for punch queries based on the Shift Type
+    schedule and configured check-in / check-out buffers:
+      - begin_check_in_before_shift_start_time (in minutes)
+      - allow_check_out_after_shift_end_time (in minutes)
+
+    For overnight shifts (end_time < start_time):
+      - Start: attendance_date at shift start_time minus begin_check_in buffer
+      - End: (attendance_date + 1 day) at shift end_time plus allow_check_out buffer
+      (defaults to 60 minutes checkout grace if unset/zero).
+
+    For normal day shifts or when shift is not assigned:
+      - Start: attendance_date 00:00:00
+      - End: (attendance_date + 1 day) 00:00:00
+      (preserves standard day-shift behavior).
+    """
+    if isinstance(attendance_date, str):
+        date_obj = getdate(attendance_date)
+    else:
+        date_obj = attendance_date
+
+    day_start = datetime.combine(date_obj, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
+
+    if not shift_name:
+        return day_start, day_end
+
+    shift_doc = frappe.db.get_value(
+        "Shift Type",
+        shift_name,
+        [
+            "start_time",
+            "end_time",
+            "begin_check_in_before_shift_start_time",
+            "allow_check_out_after_shift_end_time",
+        ],
+        as_dict=True,
+    )
+    if not shift_doc or not shift_doc.start_time or not shift_doc.end_time:
+        return day_start, day_end
+
+    start_delta = _as_timedelta(shift_doc.start_time)
+    end_delta = _as_timedelta(shift_doc.end_time)
+    if not start_delta or not end_delta:
+        return day_start, day_end
+
+    if (end_delta - start_delta).total_seconds() < 0:
+        check_in_buf = cint(shift_doc.begin_check_in_before_shift_start_time)
+        check_out_buf = cint(shift_doc.allow_check_out_after_shift_end_time)
+        if check_out_buf <= 0:
+            check_out_buf = 60
+
+        window_start = day_start + start_delta - timedelta(minutes=check_in_buf)
+        window_end = day_start + timedelta(days=1) + end_delta + timedelta(minutes=check_out_buf)
+        return window_start, window_end
+
+    return day_start, day_end
+
+
+def _leave_protected_attendance(attendance):
+    if not attendance:
+        return None
+    if isinstance(attendance, str):
+        row = frappe.db.get_value(
+            "Attendance",
+            attendance,
+            ["status", "leave_application", "leave_type", "attendance_request"],
+            as_dict=True,
+        )
+    elif hasattr(attendance, "get"):
+        row = attendance
+    else:
+        row = getattr(attendance, "__dict__", None)
+
+    if not row:
+        return None
+    if row.get("leave_application"):
+        return row.get("leave_application")
+    if row.get("status") == "On Leave":
+        return row.get("leave_type") or "On Leave"
+    if row.get("attendance_request"):
+        return row.get("attendance_request")
+    if row.get("status") in ("Work From Home", "On Duty"):
+        return row.get("status")
+    return None
+
+
 @frappe.whitelist()
 def get_employee_checkin_entries(employee, attendance_date, doc):
-    # 1. Convert string date to datetime objects
-    start_date = get_datetime(attendance_date)
-    end_date = start_date + timedelta(days=1)
+    attendance_doc = frappe.get_doc("Attendance", doc)
+
+    # 0. On Leave protection
+    if attendance_doc.leave_application or attendance_doc.status == "On Leave":
+        return {
+            "in_time": attendance_doc.in_time,
+            "out_time": attendance_doc.out_time,
+            "status": attendance_doc.status,
+            "message": f"{doc}: Skipped, approved leave ({attendance_doc.leave_application or attendance_doc.status}) was not overwritten.",
+        }
+
+    # 1. Resolve shift and shift-aware punch window
+    shift = attendance_doc.shift
+    if not shift:
+        active_sa = frappe.get_all(
+            "Shift Assignment",
+            filters={"employee": employee, "start_date": ["<=", attendance_date], "docstatus": 1},
+            or_filters=[["end_date", ">=", attendance_date], ["end_date", "is", "not set"]],
+            fields=["shift_type"],
+            order_by="start_date desc, creation desc",
+            limit_page_length=1,
+        )
+        if active_sa:
+            shift = active_sa[0].get("shift_type")
+
+    start_date, end_date = _get_shift_punch_window(shift, attendance_date)
 
     # 2. Fetch first and last check-ins
     in_time_doc = frappe.get_all(
@@ -44,27 +178,28 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
         in_time = in_time_doc[0].time if in_time_doc else None
         out_time = out_time_doc[0].time if out_time_doc else None
 
-    # 4. Load the Attendance document
-    attendance_doc = frappe.get_doc("Attendance", doc)
-    
-    # 5. Update the values in memory first so set_status can calculate
+    # 4. Update the values in memory first so set_status can calculate
     attendance_doc.in_time = in_time
     attendance_doc.out_time = out_time
 
-    # 6. Manually update in_time and out_time in DB (since it's submitted)
+    # 5. Manually update in_time and out_time in DB (since it's submitted)
     attendance_doc.db_set('in_time', in_time)
     attendance_doc.db_set('out_time', out_time)
 
-    # 7. Run your status logic
-    # Your set_status already uses db_set for status and working_hours,
-    # so it will work fine on a submitted document.
+    # 6. Run status logic
     if in_time or out_time:
         set_status(attendance_doc, "validate")
     else:
-        from valence.valence.doc_events.attendance import resolve_no_punch_status
+        # Check approved request protection before resolving to no punch / Absent
+        is_request_protected = (
+            attendance_doc.attendance_request
+            or attendance_doc.status in ("Work From Home", "On Duty")
+        )
+        if not is_request_protected:
+            from valence.valence.doc_events.attendance import resolve_no_punch_status
 
-        resolve_no_punch_status(employee, attendance_date, attendance_doc.name)
-        attendance_doc.reload()
+            resolve_no_punch_status(employee, attendance_date, attendance_doc.name)
+            attendance_doc.reload()
 
     return {
         "in_time": in_time,
@@ -129,42 +264,37 @@ def get_attendance_connections(employee, attendance_date):
     }
 
 
-def _leave_protected_attendance(attendance):
+@frappe.whitelist()
+def get_employee_checkin_entries_multiple(employee, attendance_date, attendance):
     row = frappe.db.get_value(
         "Attendance",
         attendance,
-        ["status", "leave_application", "leave_type"],
+        ["name", "status", "leave_application", "leave_type", "attendance_request", "shift"],
         as_dict=True,
     )
-    if not row:
-        return None
-    if row.leave_application:
-        return row.leave_application
-    if row.status == "On Leave":
-        return row.leave_type or "On Leave"
-    return None
 
-
-@frappe.whitelist()
-def get_employee_checkin_entries_multiple(employee, attendance_date, attendance):
-    messages = []
-
-    protected = _leave_protected_attendance(attendance)
-    if protected:
+    if row and (row.leave_application or row.status == "On Leave"):
+        leave_label = row.leave_application or row.leave_type or "On Leave"
         return {
             "attendance": attendance,
-            "message": f"{attendance}: Skipped, approved leave ({protected}) was not overwritten.",
+            "message": f"{attendance}: Skipped, approved leave ({leave_label}) was not overwritten.",
         }
 
-    # Convert date safely
-    if isinstance(attendance_date, str):
-        date_obj = datetime.strptime(attendance_date, "%Y-%m-%d").date()
-        start_date = get_datetime(attendance_date)
-    else:
-        date_obj = attendance_date
-        start_date = get_datetime(attendance_date)
+    shift = row.shift if row else None
+    if not shift:
+        active_sa = frappe.get_all(
+            "Shift Assignment",
+            filters={"employee": employee, "start_date": ["<=", attendance_date], "docstatus": 1},
+            or_filters=[["end_date", ">=", attendance_date], ["end_date", "is", "not set"]],
+            fields=["shift_type"],
+            order_by="start_date desc, creation desc",
+            limit_page_length=1,
+        )
+        if active_sa:
+            shift = active_sa[0].get("shift_type")
 
-    end_date = start_date + timedelta(days=1)
+    start_date, end_date = _get_shift_punch_window(shift, attendance_date)
+    date_obj = getdate(attendance_date)
 
     # Fetch first check-in
     in_time_doc = frappe.get_all(
@@ -216,8 +346,14 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
         }
 
     # ------------------------------------------------
-    # Case 2: No punches → Holiday / Weekly Off / Absent
+    # Case 2: No punches → Check Attendance Request protection first
     # ------------------------------------------------
+    if row and (row.attendance_request or row.status in ("Work From Home", "On Duty")):
+        req_label = row.attendance_request or row.status
+        return {
+            "attendance": attendance,
+            "message": f"{attendance}: Skipped, approved request ({req_label}) was not overwritten.",
+        }
 
     from valence.valence.doc_events.attendance import resolve_no_punch_status
 
@@ -279,7 +415,21 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
 #             frappe.db.commit()
 #         return "Weekly Off"
 
+def get_holiday_list_for_employee_safe(employee):
+    if not employee:
+        return None
+    holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+    if holiday_list:
+        return holiday_list
+    company = frappe.db.get_value("Employee", employee, "company")
+    if company:
+        return frappe.get_cached_value("Company", company, "default_holiday_list")
+    return None
+
+
 def get_shift_weekly_off_days(employee, date_obj):
+    if not employee or not date_obj:
+        return set()
     if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
         return set()
 
@@ -292,16 +442,17 @@ def get_shift_weekly_off_days(employee, date_obj):
         },
         or_filters=[["end_date", ">=", date_obj], ["end_date", "is", "not set"]],
         fields=["custom_off_day"],
-        order_by="start_date desc",
+        order_by="start_date desc, creation desc",
+        limit_page_length=1,
     )
 
-    for row in assignments:
-        raw = (row.custom_off_day or "").strip()
-        if not raw:
-            continue
-        return {d.strip().lower() for d in raw.split(",") if d.strip()}
+    if not assignments:
+        return set()
 
-    return set()
+    raw = (assignments[0].get("custom_off_day") or "").strip()
+    if not raw:
+        return set()
+    return {d.strip().lower() for d in raw.split(",") if d.strip()}
 
 
 def get_day_type_map(employees, start_date, end_date):
@@ -315,12 +466,35 @@ def get_day_type_map(employees, start_date, end_date):
     end = getdate(end_date)
 
     holiday_lists = {}
+    companies = {}
     for row in frappe.get_all(
         "Employee",
         filters={"name": ["in", employees]},
-        fields=["name", "holiday_list"],
+        fields=["name", "holiday_list", "company"],
     ):
         holiday_lists[row.name] = row.holiday_list
+        if row.company:
+            companies[row.name] = row.company
+
+    missing_emp_companies = {
+        emp: companies[emp]
+        for emp, hl in holiday_lists.items()
+        if not hl and emp in companies
+    }
+    if missing_emp_companies:
+        distinct_companies = sorted(set(missing_emp_companies.values()))
+        company_defaults = {}
+        for row in frappe.get_all(
+            "Company",
+            filters={"name": ["in", distinct_companies]},
+            fields=["name", "default_holiday_list"],
+        ):
+            if row.default_holiday_list:
+                company_defaults[row.name] = row.default_holiday_list
+
+        for emp, comp in missing_emp_companies.items():
+            if comp in company_defaults:
+                holiday_lists[emp] = company_defaults[comp]
 
     distinct_lists = sorted({hl for hl in holiday_lists.values() if hl})
     holidays = {}
@@ -345,13 +519,13 @@ def get_day_type_map(employees, start_date, end_date):
                 "start_date": ["<=", end],
             },
             or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
-            fields=["employee", "custom_off_day", "start_date", "end_date"],
-            order_by="start_date desc",
+            fields=["employee", "custom_off_day", "start_date", "end_date", "creation"],
+            order_by="start_date desc, creation desc",
         )
         for row in rows:
             assignments.setdefault(row.employee, []).append(row)
 
-    def off_days_for(employee, date_obj):
+    def active_shift_off_days(employee, date_obj):
         for row in assignments.get(employee, []):
             if getdate(row.start_date) > date_obj:
                 continue
@@ -359,7 +533,7 @@ def get_day_type_map(employees, start_date, end_date):
                 continue
             raw = (row.custom_off_day or "").strip()
             if not raw:
-                continue
+                return set()
             return {d.strip().lower() for d in raw.split(",") if d.strip()}
         return set()
 
@@ -368,12 +542,22 @@ def get_day_type_map(employees, start_date, end_date):
     while day <= end:
         weekday = day.strftime("%A").lower()
         for employee in employees:
+            shift_off_days = active_shift_off_days(employee, day)
             holiday_list = holiday_lists.get(employee)
+            is_holiday_entry = (holiday_list, day) in holidays if holiday_list else False
+            is_weekly_off_holiday = holidays.get((holiday_list, day)) == 1 if is_holiday_entry else False
+
             day_type = None
-            if holiday_list and (holiday_list, day) in holidays:
-                day_type = "Weekly Off" if holidays[(holiday_list, day)] else "Holiday"
-            elif weekday in off_days_for(employee, day):
+            if is_holiday_entry and not is_weekly_off_holiday:
+                day_type = "Holiday"
+            elif shift_off_days:
+                if weekday in shift_off_days:
+                    day_type = "Weekly Off"
+                else:
+                    day_type = None
+            elif is_weekly_off_holiday:
                 day_type = "Weekly Off"
+
             result[(employee, day)] = day_type
         day = add_days(day, 1)
 
@@ -385,9 +569,12 @@ def get_day_type(employee, attendance_date):
         return None
 
     date_obj = getdate(attendance_date)
+    weekday = date_obj.strftime("%A").lower()
 
-    holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+    shift_off_days = get_shift_weekly_off_days(employee, date_obj)
+    holiday_list = get_holiday_list_for_employee_safe(employee)
 
+    holiday = None
     if holiday_list:
         holiday = frappe.db.get_value(
             "Holiday",
@@ -399,10 +586,18 @@ def get_day_type(employee, attendance_date):
             as_dict=True
         )
 
-        if holiday:
-            return "Weekly Off" if holiday.weekly_off else "Holiday"
+    # 1. Public Holiday (weekly_off == 0) always applies
+    if holiday and not cint(holiday.weekly_off):
+        return "Holiday"
 
-    if date_obj.strftime("%A").lower() in get_shift_weekly_off_days(employee, date_obj):
+    # 2. Shift-based weekly off overrides Holiday List weekly_off
+    if shift_off_days:
+        if weekday in shift_off_days:
+            return "Weekly Off"
+        return None
+
+    # 3. Holiday List weekly_off
+    if holiday and cint(holiday.weekly_off):
         return "Weekly Off"
 
     return None

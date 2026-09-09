@@ -451,6 +451,33 @@ def run():
 			str(sorted(september_dates)),
 		)
 
+		from valence.valence.override.whitelisted_method.roster import get_events
+
+		def _holiday_dates(payload):
+			return {
+				str(row["holiday_date"])
+				for row in payload.get(employee, [])
+				if "holiday" in row
+			}
+
+		september_events = _holiday_dates(
+			get_events("2026-09-01", "2026-09-30", {"name": employee}, {})
+		)
+		ok(
+			"Roster events drop the Holiday List Sunday inside the period",
+			"2026-09-04" in september_events and "2026-09-06" not in september_events,
+			str(sorted(september_events)),
+		)
+
+		october_events = _holiday_dates(
+			get_events("2026-10-01", "2026-10-31", {"name": employee}, {})
+		)
+		ok(
+			"Roster events keep the Holiday List Sunday after the period",
+			"2026-10-04" in october_events,
+			str(sorted(october_events)),
+		)
+
 		frappe.db.set_value(
 			"Employee",
 			employee,

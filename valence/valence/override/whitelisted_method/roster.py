@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import getdate
+from frappe.utils import cint, getdate
 
 from hrms.api.roster import get_events as hrms_get_events
 
@@ -7,17 +7,27 @@ from hrms.api.roster import get_events as hrms_get_events
 @frappe.whitelist()
 def get_events(month_start, month_end, employee_filters, shift_filters):
     events = hrms_get_events(month_start, month_end, employee_filters, shift_filters)
-    weekly_offs = get_weekly_offs(month_start, month_end, employee_filters)
-    for employee, off_days in weekly_offs.items():
+    day_types = get_day_types(month_start, month_end, employee_filters)
+    covered = {employee for employee, _ in day_types}
+
+    for employee in list(events):
+        if employee not in covered:
+            continue
+        events[employee] = [
+            event for event in events[employee] if not _is_weekly_off_holiday(event)
+        ]
+
+    for employee, off_days in build_weekly_offs(day_types).items():
         events.setdefault(employee, []).extend(off_days)
+
     return events
 
 
-def get_weekly_offs(month_start, month_end, employee_filters):
-    """
-    Weekly offs for the Roster, resolved per date by the canonical day-type map so
-    Roster, Attendance and the Dashboard cannot disagree.
-    """
+def _is_weekly_off_holiday(event):
+    return "holiday" in event and cint(event.get("weekly_off"))
+
+
+def get_day_types(month_start, month_end, employee_filters):
     from valence.api import get_day_type_map
 
     Employee = frappe.qb.DocType("Employee")
@@ -29,9 +39,10 @@ def get_weekly_offs(month_start, month_end, employee_filters):
     if not employees:
         return {}
 
-    start, end = getdate(month_start), getdate(month_end)
-    day_types = get_day_type_map(employees, start, end)
+    return get_day_type_map(employees, getdate(month_start), getdate(month_end))
 
+
+def build_weekly_offs(day_types):
     weekly_offs = {}
     for (employee, date), day_type in day_types.items():
         if day_type != "Weekly Off":
@@ -46,3 +57,7 @@ def get_weekly_offs(month_start, month_end, employee_filters):
         )
 
     return weekly_offs
+
+
+def get_weekly_offs(month_start, month_end, employee_filters):
+    return build_weekly_offs(get_day_types(month_start, month_end, employee_filters))

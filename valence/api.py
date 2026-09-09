@@ -338,13 +338,25 @@ def _weekly_off_days_from_assignment(assignment):
     return {d.strip().lower() for d in raw.split(",") if d.strip()}
 
 
+def _extend_over_off_days(date_obj, off_days, step):
+    from frappe.utils import add_days
+
+    for _ in range(6):
+        if not off_days:
+            break
+        candidate = add_days(date_obj, step)
+        if candidate.strftime("%A").lower() not in off_days:
+            break
+        date_obj = candidate
+
+    return date_obj
+
+
 def _schedule_off_windows(employees):
     if not frappe.db.has_column("Shift Assignment", "shift_schedule_assignment"):
         return {}
 
     from frappe.query_builder.functions import Count, Max, Min
-
-    from frappe.utils import add_days
 
     ShiftAssignment = frappe.qb.DocType("Shift Assignment")
     rows = (
@@ -372,22 +384,17 @@ def _schedule_off_windows(employees):
     windows = {}
     for row in rows:
         off_days = _weekly_off_days_from_assignment(row)
-        start = getdate(row.start_date)
-
-        for _ in range(6):
-            if not off_days:
-                break
-            previous = add_days(start, -1)
-            if previous.strftime("%A").lower() not in off_days:
-                break
-            start = previous
+        start = _extend_over_off_days(getdate(row.start_date), off_days, -1)
+        end = row.end_date if row.bounded == row.total else None
+        if end:
+            end = _extend_over_off_days(getdate(end), off_days, 1)
 
         windows.setdefault(row.employee, []).append(
             frappe._dict(
                 {
                     "custom_off_day": row.custom_off_day,
                     "start_date": start,
-                    "end_date": row.end_date if row.bounded == row.total else None,
+                    "end_date": end,
                 }
             )
         )

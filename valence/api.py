@@ -510,11 +510,21 @@ def get_day_type_map(employees, start_date, end_date):
         weekday = day.strftime("%A").lower()
         for employee in employees:
             holiday_list = holiday_lists.get(employee)
-            day_type = None
+            holiday_weekly_off = None
             if holiday_list and (holiday_list, day) in holidays:
-                day_type = "Weekly Off" if holidays[(holiday_list, day)] else "Holiday"
-            elif weekday in off_days_for(employee, day):
-                day_type = "Weekly Off"
+                holiday_weekly_off = cint(holidays[(holiday_list, day)])
+
+            if holiday_weekly_off == 0:
+                day_type = "Holiday"
+            else:
+                shift_off_days = off_days_for(employee, day)
+                if shift_off_days:
+                    day_type = "Weekly Off" if weekday in shift_off_days else None
+                elif holiday_weekly_off:
+                    day_type = "Weekly Off"
+                else:
+                    day_type = None
+
             result[(employee, day)] = day_type
         day = add_days(day, 1)
 
@@ -531,6 +541,7 @@ def get_day_type(employee, attendance_date):
 
     holiday_list = get_holiday_list_for_employee(employee, raise_exception=False)
 
+    holiday = None
     if holiday_list:
         holiday = frappe.db.get_value(
             "Holiday",
@@ -542,10 +553,16 @@ def get_day_type(employee, attendance_date):
             as_dict=True
         )
 
-        if holiday:
-            return "Weekly Off" if holiday.weekly_off else "Holiday"
+        if holiday and not cint(holiday.weekly_off):
+            return "Holiday"
 
-    if date_obj.strftime("%A").lower() in get_shift_weekly_off_days(employee, date_obj):
+    shift_off_days = get_shift_weekly_off_days(employee, date_obj)
+    if shift_off_days:
+        if date_obj.strftime("%A").lower() in shift_off_days:
+            return "Weekly Off"
+        return None
+
+    if holiday:
         return "Weekly Off"
 
     return None

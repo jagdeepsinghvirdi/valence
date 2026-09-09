@@ -108,6 +108,53 @@ def _make_assignment(employee, shift, off_day, start_date, end_date=None):
 	return doc.name
 
 
+def _make_schedule_assignment(employee, shift, repeat_on_days, start_date, end_date):
+	from hrms.hr.doctype.shift_schedule.shift_schedule import get_or_insert_shift_schedule
+
+	schedule = get_or_insert_shift_schedule(shift, "Every Week", repeat_on_days)
+	doc = frappe.get_doc(
+		{
+			"doctype": "Shift Schedule Assignment",
+			"shift_schedule": schedule,
+			"employee": employee,
+			"company": _company(),
+			"shift_status": "Active",
+			"enabled": 0,
+		}
+	).insert(ignore_permissions=True)
+	doc.create_shifts(start_date, end_date)
+	return doc.name
+
+
+def _ensure_sunday_holiday_list():
+	name = f"{PREFIX} Sundays"
+	if frappe.db.exists("Holiday List", name):
+		return name
+
+	from frappe.utils import add_days
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Holiday List",
+			"__newname": name,
+			"holiday_list_name": name,
+			"from_date": "2026-01-01",
+			"to_date": "2026-12-31",
+		}
+	)
+
+	day = getdate("2026-01-04")
+	while day <= getdate("2026-12-31"):
+		doc.append(
+			"holidays",
+			{"holiday_date": day, "description": "Sunday", "weekly_off": 1},
+		)
+		day = add_days(day, 7)
+
+	doc.insert(ignore_permissions=True)
+	return name
+
+
 def _cleanup(employee):
 	for name in frappe.get_all(
 		"Shift Assignment", filters={"employee": employee}, pluck="name"
@@ -117,6 +164,11 @@ def _cleanup(employee):
 			doc.flags.ignore_permissions = True
 			doc.cancel()
 		frappe.delete_doc("Shift Assignment", name, force=1, ignore_permissions=True)
+
+	for name in frappe.get_all(
+		"Shift Schedule Assignment", filters={"employee": employee}, pluck="name"
+	):
+		frappe.delete_doc("Shift Schedule Assignment", name, force=1, ignore_permissions=True)
 
 
 def run():
@@ -257,6 +309,156 @@ def run():
 			"2026-06-08" not in roster_dates,
 			str(sorted(roster_dates)),
 		)
+
+		print("")
+		print("-- Shift schedule gaps " + "-" * 48)
+
+		_cleanup(employee)
+		_make_schedule_assignment(
+			employee,
+			TEMP_SHIFT,
+			["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"],
+			"2026-05-01",
+			"2026-05-29",
+		)
+
+		schedule_map = get_day_type_map([employee], "2026-05-01", "2026-05-31")
+		ok(
+			"Schedule off day shows on the start date when it is an off day",
+			schedule_map.get((employee, getdate("2026-05-01"))) == "Weekly Off",
+			str(schedule_map.get((employee, getdate("2026-05-01")))),
+		)
+		ok(
+			"Schedule off day shows on a gap day inside the schedule",
+			schedule_map.get((employee, getdate("2026-05-15"))) == "Weekly Off",
+			str(schedule_map.get((employee, getdate("2026-05-15")))),
+		)
+		ok(
+			"Schedule off day shows on the end date when it is an off day",
+			schedule_map.get((employee, getdate("2026-05-29"))) == "Weekly Off",
+			str(schedule_map.get((employee, getdate("2026-05-29")))),
+		)
+		ok(
+			"Working day inside the schedule is not a weekly off",
+			schedule_map.get((employee, getdate("2026-05-28"))) is None,
+			str(schedule_map.get((employee, getdate("2026-05-28")))),
+		)
+		ok(
+			"Schedule off day does not leak past the schedule end",
+			get_day_type(employee, "2026-06-05") is None,
+			str(get_day_type(employee, "2026-06-05")),
+		)
+		ok(
+			"Single-date lookup agrees with the bulk map on the end date",
+			get_day_type(employee, "2026-05-29") == "Weekly Off",
+			str(get_day_type(employee, "2026-05-29")),
+		)
+
+		print("")
+		print("-- Weekly off backfill " + "-" * 48)
+
+		for name in frappe.get_all(
+			"Shift Assignment", filters={"employee": employee}, pluck="name"
+		):
+			frappe.db.set_value(
+				"Shift Assignment", name, "custom_off_day", None, update_modified=False
+			)
+
+		ok(
+			"Legacy assignment with a blank weekly off shows no off day",
+			get_day_type(employee, "2026-05-15") is None,
+			str(get_day_type(employee, "2026-05-15")),
+		)
+
+		from valence.patches.backfill_shift_assignment_weekly_off import execute as backfill
+
+		backfill()
+
+		ok(
+			"Backfill restores the off day from the schedule",
+			get_day_type(employee, "2026-05-15") == "Weekly Off",
+			str(get_day_type(employee, "2026-05-15")),
+		)
+		ok(
+			"Backfill also restores the schedule end date",
+			get_day_type(employee, "2026-05-29") == "Weekly Off",
+			str(get_day_type(employee, "2026-05-29")),
+		)
+		ok(
+			"Backfill leaves working days alone",
+			get_day_type(employee, "2026-05-28") is None,
+			str(get_day_type(employee, "2026-05-28")),
+		)
+
+		backfill()
+
+		ok(
+			"Backfill is idempotent",
+			get_day_type(employee, "2026-05-15") == "Weekly Off",
+			str(get_day_type(employee, "2026-05-15")),
+		)
+
+		print("")
+		print("-- Shift off day vs Holiday List " + "-" * 38)
+
+		_cleanup(employee)
+		previous_holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+		frappe.db.set_value(
+			"Employee",
+			employee,
+			"holiday_list",
+			_ensure_sunday_holiday_list(),
+			update_modified=False,
+		)
+		_make_assignment(employee, DEFAULT_SHIFT, "Friday", "2026-09-01", "2026-09-30")
+
+		ok(
+			"Shift off day is a Weekly Off inside the period",
+			get_day_type(employee, "2026-09-04") == "Weekly Off",
+			str(get_day_type(employee, "2026-09-04")),
+		)
+		ok(
+			"Holiday List weekly off is suppressed inside the period",
+			get_day_type(employee, "2026-09-06") is None,
+			str(get_day_type(employee, "2026-09-06")),
+		)
+		ok(
+			"Holiday List weekly off resumes after the period",
+			get_day_type(employee, "2026-10-04") == "Weekly Off",
+			str(get_day_type(employee, "2026-10-04")),
+		)
+
+		override_map = get_day_type_map([employee], "2026-09-01", "2026-09-30")
+		ok(
+			"Bulk map marks only the shift off day",
+			override_map.get((employee, getdate("2026-09-04"))) == "Weekly Off"
+			and override_map.get((employee, getdate("2026-09-06"))) is None,
+			str(
+				[
+					override_map.get((employee, getdate("2026-09-04"))),
+					override_map.get((employee, getdate("2026-09-06"))),
+				]
+			),
+		)
+
+		from valence.valence.override.whitelisted_method.roster import get_weekly_offs
+
+		september = get_weekly_offs("2026-09-01", "2026-09-30", {"name": employee})
+		september_dates = {row["holiday_date"] for row in september.get(employee, [])}
+		ok(
+			"Roster shows the shift off day and not the Holiday List Sunday",
+			"2026-09-04" in september_dates and "2026-09-06" not in september_dates,
+			str(sorted(september_dates)),
+		)
+
+		frappe.db.set_value(
+			"Employee",
+			employee,
+			"holiday_list",
+			previous_holiday_list,
+			update_modified=False,
+		)
+		_cleanup(employee)
 
 		print("")
 		print("-- Overnight shift and half-day thresholds " + "-" * 28)

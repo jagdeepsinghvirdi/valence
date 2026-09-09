@@ -1,0 +1,13 @@
+diff --git a/roster/src/components/MonthViewTable.vue b/roster/src/components/MonthViewTable.vue
+index 8d9a6ca..8f319e1 100644
+--- a/roster/src/components/MonthViewTable.vue
++++ b/roster/src/components/MonthViewTable.vue
+@@ -46,7 +46,7 @@
+ 							/>
+ 							<div class="flex flex-col ml-2 my-0.5 truncate">
+ 								<div class="truncate text-base font-medium">
+-									{{ employee.employee_name }}
++									{{ employee.employee_name }} - {{ employee.name }}
+ 								</div>
+ 								<div class="mt-auto text-xs text-gray-500 truncate">
+ 									{{ employee.designation }}

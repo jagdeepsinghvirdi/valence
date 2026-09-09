@@ -281,6 +281,97 @@ def run():
         half_second == "Second Half",
         f"got {half_second}",
     )
+    half_both = get_worked_half(overnight_name, "2026-09-12 22:00:00", "2026-09-13 06:00:00")
+    ok(
+        "Overnight worked full 22:00-06:00 detected as Both",
+        half_both == "Both",
+        f"got {half_both}",
+    )
+
+    # 3B. Multiple Overnight Shift Timings (Generic Midpoint & Worked Half)
+    # Test 1: 18:00 to 02:00 (midpoint 22:00, before midnight)
+    over_early = "US5-Test-Overnight-18-02"
+    if not frappe.db.exists("Shift Type", over_early):
+        frappe.get_doc({
+            "doctype": "Shift Type",
+            "name": over_early,
+            "start_time": "18:00:00",
+            "end_time": "02:00:00",
+            "begin_check_in_before_shift_start_time": 60,
+            "allow_check_out_after_shift_end_time": 60,
+        }).insert(ignore_permissions=True)
+    ok("Night shift 18:00-02:00 detected as overnight", _is_overnight_shift(over_early))
+    ok("18:00-02:00 duration is 8.0h", get_shift_duration_hours(over_early) == 8.0)
+    ok("18:00-02:00 midpoint is 22:00 (before midnight)", get_shift_midpoint(over_early) == timedelta(hours=22))
+    ok(
+        "18:00-02:00 worked 18:00-22:00 detected as First Half",
+        get_worked_half(over_early, "2026-09-12 18:00:00", "2026-09-12 22:00:00") == "First Half",
+    )
+    ok(
+        "18:00-02:00 worked 22:00-02:00 detected as Second Half",
+        get_worked_half(over_early, "2026-09-12 22:00:00", "2026-09-13 02:00:00") == "Second Half",
+    )
+    ok(
+        "18:00-02:00 worked 23:00-02:00 detected as Second Half",
+        get_worked_half(over_early, "2026-09-12 23:00:00", "2026-09-13 02:00:00") == "Second Half",
+    )
+    ok(
+        "18:00-02:00 worked 18:00-02:00 detected as Both",
+        get_worked_half(over_early, "2026-09-12 18:00:00", "2026-09-13 02:00:00") == "Both",
+    )
+
+    # Test 2: 20:00 to 04:00 (midpoint 24:00, exactly at midnight)
+    over_mid = "US5-Test-Overnight-20-04"
+    if not frappe.db.exists("Shift Type", over_mid):
+        frappe.get_doc({
+            "doctype": "Shift Type",
+            "name": over_mid,
+            "start_time": "20:00:00",
+            "end_time": "04:00:00",
+            "begin_check_in_before_shift_start_time": 60,
+            "allow_check_out_after_shift_end_time": 60,
+        }).insert(ignore_permissions=True)
+    ok("Night shift 20:00-04:00 detected as overnight", _is_overnight_shift(over_mid))
+    ok("20:00-04:00 midpoint is 24:00 (midnight)", get_shift_midpoint(over_mid) == timedelta(hours=24))
+    ok(
+        "20:00-04:00 worked 20:00-24:00 detected as First Half",
+        get_worked_half(over_mid, "2026-09-12 20:00:00", "2026-09-13 00:00:00") == "First Half",
+    )
+    ok(
+        "20:00-04:00 worked 00:00-04:00 detected as Second Half",
+        get_worked_half(over_mid, "2026-09-13 00:00:00", "2026-09-13 04:00:00") == "Second Half",
+    )
+    ok(
+        "20:00-04:00 worked 20:00-04:00 detected as Both",
+        get_worked_half(over_mid, "2026-09-12 20:00:00", "2026-09-13 04:00:00") == "Both",
+    )
+
+    # Test 3: 19:00 to 07:00 (12-hour shift, midpoint 25:00, 01:00 AM)
+    over_12h = "US5-Test-Overnight-19-07"
+    if not frappe.db.exists("Shift Type", over_12h):
+        frappe.get_doc({
+            "doctype": "Shift Type",
+            "name": over_12h,
+            "start_time": "19:00:00",
+            "end_time": "07:00:00",
+            "begin_check_in_before_shift_start_time": 60,
+            "allow_check_out_after_shift_end_time": 60,
+        }).insert(ignore_permissions=True)
+    ok("12h night shift 19:00-07:00 detected as overnight", _is_overnight_shift(over_12h))
+    ok("19:00-07:00 duration is 12.0h", get_shift_duration_hours(over_12h) == 12.0)
+    ok("19:00-07:00 midpoint is 25:00 (01:00 AM next day)", get_shift_midpoint(over_12h) == timedelta(hours=25))
+    ok(
+        "19:00-07:00 worked 19:00-01:00 detected as First Half",
+        get_worked_half(over_12h, "2026-09-12 19:00:00", "2026-09-13 01:00:00") == "First Half",
+    )
+    ok(
+        "19:00-07:00 worked 01:00-07:00 detected as Second Half",
+        get_worked_half(over_12h, "2026-09-13 01:00:00", "2026-09-13 07:00:00") == "Second Half",
+    )
+    ok(
+        "19:00-07:00 worked 19:00-07:00 detected as Both",
+        get_worked_half(over_12h, "2026-09-12 19:00:00", "2026-09-13 07:00:00") == "Both",
+    )
 
     # Shift-aware punch window calculation
     w_start, w_end = _get_shift_punch_window(overnight_name, "2026-09-12")
@@ -617,6 +708,24 @@ def run():
         f"got {day_type_pub_shift}",
     )
 
+    # Bulk map conflict verification (Shift Assignment weekly off vs Holiday List weekly off)
+    map_conflict = get_day_type_map([emp_id], "2026-09-01", "2026-09-15")
+    ok(
+        "Bulk map: Sunday resolves to None when Shift weekly off is Tuesday (override)",
+        map_conflict.get((emp_id, getdate("2026-09-06"))) is None,
+        f"got {map_conflict.get((emp_id, getdate('2026-09-06')))}",
+    )
+    ok(
+        "Bulk map: Shift weekly off (Tuesday) resolves to Weekly Off",
+        map_conflict.get((emp_id, getdate("2026-09-08"))) == "Weekly Off",
+        f"got {map_conflict.get((emp_id, getdate('2026-09-08')))}",
+    )
+    ok(
+        "Bulk map: Public holiday on shift weekly off day resolves to Holiday (public holiday precedence)",
+        map_conflict.get((emp_id, getdate("2026-09-15"))) == "Holiday",
+        f"got {map_conflict.get((emp_id, getdate('2026-09-15')))}",
+    )
+
     # Newer assignment with BLANK custom_off_day does NOT leak older assignment's off-day
     sa2 = frappe.new_doc("Shift Assignment")
     sa2.employee = emp_id
@@ -788,7 +897,7 @@ def run():
     frappe.db.delete("Employee", {"name": emp_id})
     frappe.db.set_value("Company", company_name, "default_holiday_list", orig_company_hl)
     frappe.db.delete("Holiday List", {"name": hl_company})
-    frappe.db.delete("Shift Type", {"name": ["in", [shift_name, overnight_name]]})
+    frappe.db.delete("Shift Type", {"name": ["in", [shift_name, overnight_name, over_early, over_mid, over_12h]]})
 
     # ------------------------------------------------------------------------
     # 7. Regression Suites

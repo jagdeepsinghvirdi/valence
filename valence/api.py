@@ -31,7 +31,7 @@ def _is_overnight_shift(shift_name):
     if not shift_name:
         return False
     times = frappe.db.get_value("Shift Type", shift_name, ["start_time", "end_time"])
-    if not times or not times[0] or not times[1]:
+    if not times or times[0] is None or times[1] is None:
         return False
     start = _as_timedelta(times[0])
     end = _as_timedelta(times[1])
@@ -43,7 +43,18 @@ def _is_overnight_shift(shift_name):
 def _get_shift_punch_window(shift_name, attendance_date):
     """
     Computes (start_datetime, end_datetime) for punch queries based on the Shift Type
-    schedule and configured check-in / check-out buffers.
+    schedule and configured check-in / check-out buffers:
+      - begin_check_in_before_shift_start_time (in minutes)
+      - allow_check_out_after_shift_end_time (in minutes)
+
+    For overnight shifts (end_time < start_time):
+      - Start: attendance_date at shift start_time minus begin_check_in buffer
+      - End: (attendance_date + 1 day) at shift end_time plus allow_check_out buffer
+      (defaults to 60 minutes checkout grace if unset/zero).
+
+    For normal day shifts or when shift is not assigned:
+      - Start: attendance_date 00:00:00
+      - End: (attendance_date + 1 day) 00:00:00
     """
     if isinstance(attendance_date, str):
         date_obj = getdate(attendance_date)
@@ -53,7 +64,7 @@ def _get_shift_punch_window(shift_name, attendance_date):
     day_start = datetime.combine(date_obj, datetime.min.time())
     day_end = day_start + timedelta(days=1)
 
-    if not shift_name:
+    if not shift_name or not _is_overnight_shift(shift_name):
         return day_start, day_end
 
     shift_doc = frappe.db.get_value(
@@ -67,7 +78,7 @@ def _get_shift_punch_window(shift_name, attendance_date):
         ],
         as_dict=True,
     )
-    if not shift_doc or not shift_doc.start_time or not shift_doc.end_time:
+    if not shift_doc or shift_doc.start_time is None or shift_doc.end_time is None:
         return day_start, day_end
 
     start_delta = _as_timedelta(shift_doc.start_time)
@@ -75,52 +86,27 @@ def _get_shift_punch_window(shift_name, attendance_date):
     if not start_delta or not end_delta:
         return day_start, day_end
 
-    if (end_delta - start_delta).total_seconds() < 0:
-        check_in_buf = cint(shift_doc.begin_check_in_before_shift_start_time)
-        check_out_buf = cint(shift_doc.allow_check_out_after_shift_end_time)
-        if check_out_buf <= 0:
-            check_out_buf = 60
+    check_in_buf = cint(shift_doc.begin_check_in_before_shift_start_time)
+    check_out_buf = cint(shift_doc.allow_check_out_after_shift_end_time)
+    if check_out_buf <= 0:
+        check_out_buf = 60
 
-        window_start = day_start + start_delta - timedelta(minutes=check_in_buf)
-        window_end = day_start + timedelta(days=1) + end_delta + timedelta(minutes=check_out_buf)
-        return window_start, window_end
-
-    return day_start, day_end
+    window_start = day_start + start_delta - timedelta(minutes=check_in_buf)
+    window_end = day_start + timedelta(days=1) + end_delta + timedelta(minutes=check_out_buf)
+    return window_start, window_end
 
 
-def get_checkin_window_end(employee, attendance_date, start_date, shift=None):
+def get_checkin_window_end(employee, attendance_date, start_date=None, shift=None):
     """
     End of the check-in search window for an attendance date.
 
     Day shifts keep the calendar-day window. Overnight shifts (end time earlier than
     start time) extend into the next day so the out-punch after midnight is found.
     """
-    default_end = start_date + timedelta(days=1)
-
     if not shift:
         shift = get_applicable_shift(employee, attendance_date)
-    if not shift:
-        return default_end
-
-    times = frappe.db.get_value(
-        "Shift Type",
-        shift,
-        ["start_time", "end_time", "allow_check_out_after_shift_end_time"],
-        as_dict=True,
-    )
-    if not times or times.start_time is None or times.end_time is None:
-        return default_end
-
-    start_delta = _as_timedelta(times.start_time)
-    end_delta = _as_timedelta(times.end_time)
-    if start_delta is None or end_delta is None:
-        return default_end
-
-    if end_delta >= start_delta:
-        return default_end
-
-    buffer_minutes = cint(times.allow_check_out_after_shift_end_time) or 60
-    return default_end + end_delta + timedelta(minutes=buffer_minutes)
+    _, window_end = _get_shift_punch_window(shift, attendance_date)
+    return window_end
 
 
 @frappe.whitelist()
@@ -449,16 +435,149 @@ def _weekly_off_days_from_assignment(assignment):
     return {d.strip().lower() for d in raw.split(",") if d.strip()}
 
 
-def get_shift_weekly_off_days(employee, date_obj):
+def _extend_over_off_days(date_obj, off_days, step):
+    from frappe.utils import add_days
+
+    for _ in range(6):
+        if not off_days:
+            break
+        candidate = add_days(date_obj, step)
+        if candidate.strftime("%A").lower() not in off_days:
+            break
+        date_obj = candidate
+
+    return date_obj
+
+
+def _schedule_off_windows(employees):
+    if not frappe.db.has_column("Shift Assignment", "shift_schedule_assignment"):
+        return {}
+
+    from frappe.query_builder.functions import Count, Max, Min
+
+    ShiftAssignment = frappe.qb.DocType("Shift Assignment")
+    rows = (
+        frappe.qb.from_(ShiftAssignment)
+        .select(
+            ShiftAssignment.employee,
+            ShiftAssignment.custom_off_day,
+            Min(ShiftAssignment.start_date).as_("start_date"),
+            Max(ShiftAssignment.end_date).as_("end_date"),
+            Count(ShiftAssignment.name).as_("total"),
+            Count(ShiftAssignment.end_date).as_("bounded"),
+        )
+        .where(ShiftAssignment.docstatus == 1)
+        .where(ShiftAssignment.employee.isin(employees))
+        .where(ShiftAssignment.shift_schedule_assignment.notnull())
+        .where(ShiftAssignment.shift_schedule_assignment != "")
+        .groupby(
+            ShiftAssignment.employee,
+            ShiftAssignment.shift_schedule_assignment,
+            ShiftAssignment.custom_off_day,
+        )
+        .run(as_dict=True)
+    )
+
+    windows = {}
+    for row in rows:
+        off_days = _weekly_off_days_from_assignment(row)
+        start = _extend_over_off_days(getdate(row.start_date), off_days, -1)
+        end = row.end_date if row.bounded == row.total else None
+        if end:
+            end = _extend_over_off_days(getdate(end), off_days, 1)
+
+        windows.setdefault(row.employee, []).append(
+            frappe._dict(
+                {
+                    "custom_off_day": row.custom_off_day,
+                    "start_date": start,
+                    "end_date": end,
+                }
+            )
+        )
+
+    return windows
+
+
+def _off_day_periods(employees, start=None, end=None):
     if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        return {}
+
+    employees = [e for e in (employees or []) if e]
+    if not employees:
+        return {}
+
+    filters = {
+        "employee": ["in", employees],
+        "docstatus": 1,
+        "shift_schedule_assignment": ["is", "not set"],
+    }
+    if end:
+        filters["start_date"] = ["<=", getdate(end)]
+
+    or_filters = None
+    if start:
+        or_filters = [["end_date", ">=", getdate(start)], ["end_date", "is", "not set"]]
+
+    periods = {}
+    for row in frappe.get_all(
+        "Shift Assignment",
+        filters=filters,
+        or_filters=or_filters,
+        fields=["name", "employee", "custom_off_day", "start_date", "end_date", "creation"],
+        order_by="start_date desc, creation desc",
+    ):
+        periods.setdefault(row.employee, []).append(row)
+
+    for employee, windows in _schedule_off_windows(employees).items():
+        periods.setdefault(employee, []).extend(windows)
+
+    for rows in periods.values():
+        rows.sort(
+            key=lambda row: (
+                getdate(row.start_date),
+                str(row.get("creation") or ""),
+            ),
+            reverse=True,
+        )
+
+    return periods
+
+
+def _off_days_on(periods, date_obj):
+    date_obj = getdate(date_obj)
+
+    for row in periods or []:
+        if getdate(row.start_date) > date_obj:
+            continue
+        if row.end_date and getdate(row.end_date) < date_obj:
+            continue
+        return _weekly_off_days_from_assignment(row)
+
+    return set()
+
+
+def get_shift_weekly_off_days(employee, date_obj):
+    if not employee or not date_obj:
         return set()
 
-    return _weekly_off_days_from_assignment(
-        get_applicable_shift_assignment(employee, date_obj)
-    )
+    return _off_days_on(_off_day_periods([employee]).get(employee), date_obj)
 
 
 def get_day_type_map(employees, start_date, end_date):
+    """
+    Resolves day types across a date range for multiple employees in bulk.
+
+    Precedence:
+    1. Public Holiday (Holiday List entry with weekly_off == 0) -> "Holiday"
+    2. Shift Assignment weekly off (custom_off_day via _off_days_on):
+       - If assigned, shift weekly off overrides the Holiday List weekly off.
+       - Matches -> "Weekly Off"
+       - Does not match -> None (working day, even if Sunday is on Holiday List)
+    3. Holiday List weekly off (entry with weekly_off == 1) -> "Weekly Off"
+       (only applies when no Shift Assignment weekly off is configured)
+    4. Otherwise -> None
+    """
     from frappe.utils import add_days
 
     employees = [e for e in (employees or []) if e]
@@ -497,33 +616,10 @@ def get_day_type_map(employees, start_date, end_date):
         ):
             holidays[(row.parent, getdate(row.holiday_date))] = cint(row.weekly_off)
 
-    assignments = {}
-    if frappe.db.has_column("Shift Assignment", "custom_off_day"):
-        rows = frappe.get_all(
-            "Shift Assignment",
-            filters={
-                "employee": ["in", employees],
-                "docstatus": 1,
-                "start_date": ["<=", end],
-            },
-            or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
-            fields=["employee", "custom_off_day", "start_date", "end_date"],
-            order_by="start_date desc, creation desc",
-        )
-        for row in rows:
-            assignments.setdefault(row.employee, []).append(row)
+    periods = _off_day_periods(employees, start, end)
 
     def off_days_for(employee, date_obj):
-        for row in assignments.get(employee, []):
-            if getdate(row.start_date) > date_obj:
-                continue
-            if row.end_date and getdate(row.end_date) < date_obj:
-                continue
-            raw = (row.get("custom_off_day") or "").strip()
-            if not raw:
-                return set()
-            return {d.strip().lower() for d in raw.split(",") if d.strip()}
-        return set()
+        return _off_days_on(periods.get(employee), date_obj)
 
     result = {}
     day = start
@@ -570,6 +666,19 @@ def get_holiday_list_for_employee_safe(employee):
 
 
 def get_day_type(employee, attendance_date):
+    """
+    Resolves the day type for an employee on an attendance date.
+
+    Precedence:
+    1. Public Holiday (Holiday List entry with weekly_off == 0) -> "Holiday"
+    2. Shift Assignment weekly off (custom_off_day):
+       - If assigned, shift weekly off overrides the Holiday List weekly off.
+       - Matches -> "Weekly Off"
+       - Does not match -> None (working day, even if Sunday is on Holiday List)
+    3. Holiday List weekly off (entry with weekly_off == 1) -> "Weekly Off"
+       (only applies when no Shift Assignment weekly off is configured)
+    4. Otherwise -> None
+    """
     if not employee or not attendance_date:
         return None
 

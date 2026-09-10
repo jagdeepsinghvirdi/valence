@@ -304,6 +304,9 @@ def _measured_hours(doc):
 	if has_approved_short_leave(doc.employee, doc.attendance_date):
 		gap = get_actual_shift_gap_hours(doc.shift, doc.in_time, doc.out_time)
 		if gap:
+			shift_len = get_shift_duration_hours(doc.shift)
+			if shift_len and (hours + gap) > shift_len:
+				gap = max(0.0, shift_len - hours)
 			hours = round(hours + gap, 1)
 
 	return hours
@@ -335,6 +338,9 @@ def set_status(self, method):
 		# so approved Short Leave is not dropped as "No punch".
 		short_leave_hours = get_approved_short_leave_hours(self.employee, self.attendance_date)
 		if short_leave_hours:
+			shift_len = get_shift_duration_hours(shift)
+			if shift_len and short_leave_hours > shift_len:
+				short_leave_hours = shift_len
 			_apply_hours_status(self, short_leave_hours, shift)
 		elif day_type:
 			self.db_set("status", day_type)

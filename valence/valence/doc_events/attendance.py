@@ -63,13 +63,22 @@ def _parse_attendance_datetime(value):
 
 
 def _as_timedelta(value):
-	"""Shift Type start_time / end_time may be timedelta or time-like."""
+	"""Shift Type start_time / end_time may be timedelta, time-like, or string."""
 	if value is None:
 		return None
 	if isinstance(value, timedelta):
 		return value
 	if hasattr(value, "hour"):
 		return timedelta(hours=value.hour, minutes=value.minute, seconds=getattr(value, "second", 0) or 0)
+	if isinstance(value, str):
+		try:
+			parts = [int(p) for p in value.split(":")]
+			if len(parts) == 3:
+				return timedelta(hours=parts[0], minutes=parts[1], seconds=parts[2])
+			elif len(parts) == 2:
+				return timedelta(hours=parts[0], minutes=parts[1])
+		except Exception:
+			pass
 	return None
 
 
@@ -134,13 +143,14 @@ def _apply_hours_status(attendance, hours, shift_name):
 	attendance.db_set("working_hours", hours)
 
 	if not shift_name:
+		attendance.db_set("status", "Present" if hours > 0 else "Absent")
 		return
 
 	shift = frappe.get_doc("Shift Type", shift_name)
 	half_day_threshold = shift.working_hours_threshold_for_half_day or 0
 	absent_threshold = shift.working_hours_threshold_for_absent or 0
 
-	if hours < absent_threshold:
+	if hours <= 0 or hours < absent_threshold:
 		attendance.db_set("status", "Absent")
 	elif hours < half_day_threshold:
 		attendance.db_set("status", "Half Day")
@@ -181,8 +191,34 @@ def get_shift_start(shift_name):
 
 
 def get_worked_half(shift_name, in_time, out_time, midpoint=None, shift_start=None):
+	if not shift_name and not midpoint:
+		return None
+
+	start_td = _as_timedelta(shift_start)
+	end_td = None
+	if shift_name:
+		start_time, end_time = frappe.db.get_value(
+			"Shift Type", shift_name, ["start_time", "end_time"]
+		) or (None, None)
+		if start_time and not start_td:
+			start_td = _as_timedelta(start_time)
+		if end_time:
+			end_td = _as_timedelta(end_time)
+
+	is_overnight = False
+	if start_td and end_td:
+		is_overnight = (end_td - start_td).total_seconds() < 0
+
 	if midpoint is None:
-		midpoint = get_shift_midpoint(shift_name)
+		if not start_td or not end_td:
+			return None
+		span = (end_td - start_td).total_seconds()
+		if span < 0:
+			span += 24 * 3600
+		if span <= 0:
+			return None
+		midpoint = start_td + timedelta(seconds=span / 2)
+
 	if not midpoint:
 		return None
 
@@ -191,13 +227,17 @@ def get_worked_half(shift_name, in_time, out_time, midpoint=None, shift_start=No
 	if not in_dt or not out_dt:
 		return None
 
-	if shift_start is None:
-		shift_start = get_shift_start(shift_name)
-
 	in_td = timedelta(hours=in_dt.hour, minutes=in_dt.minute, seconds=in_dt.second)
 	out_td = timedelta(hours=out_dt.hour, minutes=out_dt.minute, seconds=out_dt.second)
 
-	if shift_start is not None and in_td < shift_start:
+	if is_overnight and start_td and end_td:
+		# Midpoint of the daytime gap between morning shift end and evening shift start
+		day_cutoff = end_td + (start_td - end_td) / 2
+		if in_td < day_cutoff:
+			in_td += timedelta(hours=24)
+		if out_td < day_cutoff:
+			out_td += timedelta(hours=24)
+	elif midpoint >= timedelta(hours=24) and in_td < (midpoint - timedelta(hours=12)):
 		in_td += timedelta(hours=24)
 		out_td += timedelta(hours=24)
 
@@ -264,6 +304,9 @@ def _measured_hours(doc):
 	if has_approved_short_leave(doc.employee, doc.attendance_date):
 		gap = get_actual_shift_gap_hours(doc.shift, doc.in_time, doc.out_time)
 		if gap:
+			shift_len = get_shift_duration_hours(doc.shift)
+			if shift_len and (hours + gap) > shift_len:
+				gap = max(0.0, shift_len - hours)
 			hours = round(hours + gap, 1)
 
 	return hours
@@ -283,6 +326,9 @@ def set_status(self, method):
 
 	day_type = get_day_type(self.employee, self.attendance_date)
 
+	if not self.in_time and not self.out_time and self.status in ("Work From Home", "On Duty", "On Leave"):
+		return
+
 	if not self.in_time and self.out_time:
 		self.db_set("status", "Mispunch")
 	elif not self.out_time and self.in_time:
@@ -292,6 +338,9 @@ def set_status(self, method):
 		# so approved Short Leave is not dropped as "No punch".
 		short_leave_hours = get_approved_short_leave_hours(self.employee, self.attendance_date)
 		if short_leave_hours:
+			shift_len = get_shift_duration_hours(shift)
+			if shift_len and short_leave_hours > shift_len:
+				short_leave_hours = shift_len
 			_apply_hours_status(self, short_leave_hours, shift)
 		elif day_type:
 			self.db_set("status", day_type)
@@ -304,9 +353,6 @@ def set_status(self, method):
 			self.db_set("working_hours", hours)
 			self.db_set("status", "Present")
 		else:
-			shift_len = get_shift_duration_hours(shift)
-			if shift_len and hours > shift_len:
-				hours = shift_len
 			_apply_hours_status(self, hours, shift)
 
 
@@ -663,6 +709,15 @@ def process_attendance_offdays():
 
 def resolve_no_punch_status(employee, attendance_date, attendance):
     from valence.api import get_day_type
+
+    current = frappe.db.get_value(
+        "Attendance", attendance, ["status", "leave_application", "attendance_request"], as_dict=True
+    )
+    if current:
+        if current.leave_application or current.status == "On Leave":
+            return current.status or "On Leave"
+        if current.attendance_request or current.status in ("Work From Home", "On Duty"):
+            return current.status
 
     status = get_day_type(employee, attendance_date) or "Absent"
 

@@ -230,6 +230,9 @@ doc_events = {
   "Shift Assignment": {
     "validate": "valence.valence.doc_events.shift_assignment.set_weekly_off_from_schedule"
   },
+  "Employee Checkin": {
+    "validate": "valence.valence.doc_events.employee_checkin.set_applicable_shift"
+  },
   # Track B leave rules (shared file with Track A #8 — coordinate edits)
   "Leave Application": {
       "validate": [

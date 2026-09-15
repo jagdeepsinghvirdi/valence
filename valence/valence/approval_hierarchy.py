@@ -229,7 +229,8 @@ def _may_act_at_super_hod_stage(user: str, employee: str | None) -> bool:
 	if user_has_any_role(user, list(HR_ROLES) + list(SYSTEM_ROLES)):
 		return True
 	if user_has_any_role(user, (SUPER_HOD_ROLE,)):
-		return True
+		approvers = get_super_hod_approvers(employee)
+		return not approvers or user in approvers
 	# No Super HOD / HR left → only Admin (already True above). Role-only Leave Approver: no.
 	return False
 

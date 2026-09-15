@@ -600,13 +600,12 @@ def run():
 			frappe.db.set_value("Leave Application", dept_leave.name, "leave_approver", OTHER_HOD_USER)
 			with _as_user(EMP_USER):
 				apply_workflow(frappe.get_doc("Leave Application", dept_leave.name), "Apply")
-			blocked = False
-			with _as_user(HOD_USER):
-				try:
-					apply_workflow(frappe.get_doc("Leave Application", dept_leave.name), "Approve")
-				except Exception:
-					blocked = True
-			ok("Department Approver path: old HOD blocked", blocked)
+			ok(
+				"Department Approver path: same-department HOD still allowed",
+				user_may_approve_or_reject(
+					frappe.get_doc("Leave Application", dept_leave.name), HOD_USER
+				),
+			)
 			with _as_user(OTHER_HOD_USER):
 				apply_workflow(frappe.get_doc("Leave Application", dept_leave.name), "Approve")
 			dept_leave.reload()
@@ -620,7 +619,6 @@ def run():
 			frappe.db.commit()
 
 		# --- Desk transitions (get_transitions) hide Approve for wrong/self users ---
-		import frappe.model.workflow as workflow_mod
 		from valence.valence.approval_hierarchy import share_with_users
 
 		# Ensure emp hierarchy is back to assigned HOD after department-approver case

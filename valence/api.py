@@ -125,9 +125,8 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
         }
 
     # 2. Convert string date to datetime objects and calculate shift window
-    start_date = get_datetime(attendance_date)
     shift = attendance_doc.shift or get_applicable_shift(employee, attendance_date)
-    end_date = get_checkin_window_end(employee, attendance_date, start_date, shift=shift)
+    start_date, end_date = _get_shift_punch_window(shift, attendance_date)
 
     # 3. Fetch first and last check-ins
     in_time_doc = frappe.get_all(
@@ -265,7 +264,7 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
         start_date = get_datetime(attendance_date)
 
     shift = frappe.db.get_value("Attendance", attendance, "shift") or get_applicable_shift(employee, attendance_date)
-    end_date = get_checkin_window_end(employee, attendance_date, start_date, shift=shift)
+    start_date, end_date = _get_shift_punch_window(shift, attendance_date)
 
     # Fetch first check-in
     in_time_doc = frappe.get_all(

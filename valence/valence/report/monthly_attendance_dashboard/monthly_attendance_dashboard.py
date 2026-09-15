@@ -15,9 +15,10 @@ from valence.valence.doc_events.attendance import (
 	get_shift_start,
 	get_worked_half,
 )
+from valence.valence.approval_hierarchy import SUPER_HOD_ROLE
 from valence.valence.override.query import (
+	UNRESTRICTED_LEAVE_ROLES,
 	_employee_for_user,
-	_has_unrestricted_leave_access,
 	_is_hod,
 )
 
@@ -326,23 +327,35 @@ def get_employees(filters, start, end):
 
 def get_permitted_employees(filters):
 	user = frappe.session.user
+	roles = set(frappe.get_roles(user))
 
-	if _has_unrestricted_leave_access(user):
+	if user == "Administrator" or roles.intersection(UNRESTRICTED_LEAVE_ROLES - {SUPER_HOD_ROLE}):
 		return None
 
 	employee = _employee_for_user(user)
+	is_super_hod = SUPER_HOD_ROLE in roles
 
 	scope = set()
 	if employee and employee.get("name"):
 		scope.add(employee.name)
 
-	if _is_hod(user) and employee and employee.get("department"):
+	if (_is_hod(user) or is_super_hod) and employee and employee.get("department"):
 		departments = get_department_descendants(employee.department)
 		scope.update(
 			frappe.get_all("Employee", filters={"department": ["in", departments]}, pluck="name")
 		)
 
-	scope.update(get_reporting_employees(user))
+	direct_reports = get_reporting_employees(user)
+	scope.update(direct_reports)
+
+	if is_super_hod and direct_reports:
+		for report_user in frappe.get_all(
+			"Employee",
+			filters={"name": ["in", list(direct_reports)], "user_id": ["is", "set"]},
+			pluck="user_id",
+		):
+			if report_user != user:
+				scope.update(get_reporting_employees(report_user))
 
 	return sorted(scope)
 

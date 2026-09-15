@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import getdate, nowdate, add_days, cint, get_first_day, get_last_day, flt
+from frappe.utils import getdate, nowdate, add_days, cint, get_first_day, get_last_day, flt, get_datetime
 from datetime import datetime, timedelta
 
 DEFAULT_OFFDAY_FULL_DAY_HOURS = 6
@@ -58,7 +58,7 @@ def _parse_attendance_datetime(value):
 	if not value:
 		return None
 	if isinstance(value, str):
-		return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+		return get_datetime(value)
 	return value
 
 
@@ -421,7 +421,7 @@ def set_short_leave_count(self, method):
     # Convert in_time to get timedelta
     if self.in_time:
         if isinstance(self.in_time, str):
-            in_time = datetime.strptime(self.in_time, "%Y-%m-%d %H:%M:%S")
+            in_time = get_datetime(self.in_time)
             
         else:
             in_time = self.in_time
@@ -450,7 +450,7 @@ def set_short_leave_count(self, method):
     # Convert out_time to get timedelta
     if self.out_time:
         if isinstance(self.out_time, str):
-            out_time = datetime.strptime(self.out_time, "%Y-%m-%d %H:%M:%S")
+            out_time = get_datetime(self.out_time)
         else:
             out_time = self.out_time
         

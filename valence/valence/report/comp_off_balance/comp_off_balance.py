@@ -104,6 +104,7 @@ def get_data(filters):
 			"from_date",
 			"to_date",
 			"leaves",
+			"transaction_type",
 		],
 		order_by="from_date asc, creation asc",
 	)
@@ -121,12 +122,12 @@ def get_data(filters):
 		for entry in emp_entries:
 			leaves = flt(entry.get("leaves"))
 
-			entry_to = getdate(entry.get("to_date")) if entry.get("to_date") else getdate(entry.get("from_date"))
-			if entry_to >= period_from:
-				if leaves > 0:
-					earned += leaves
-				elif leaves < 0:
+			entry_from = getdate(entry.get("from_date"))
+			if entry_from >= period_from:
+				if entry.get("transaction_type") == "Leave Application":
 					consumed += abs(leaves)
+				else:
+					earned += leaves
 
 		earned = flt(earned, 2)
 		consumed = flt(consumed, 2)

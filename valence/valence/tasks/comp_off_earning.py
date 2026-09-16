@@ -131,6 +131,10 @@ def process_comp_off_for_attendance(attendance_name):
 		original_allocation_name = existing_entries[0].transaction_name
 		historical_leave_type = existing_entries[0].leave_type
 		company = att.company or existing_entries[0].company
+		allocation_to_date = (
+			frappe.db.get_value("Leave Allocation", original_allocation_name, "to_date")
+			or att.attendance_date
+		)
 
 		reversal_entry = frappe.get_doc(
 			{
@@ -144,7 +148,7 @@ def process_comp_off_for_attendance(attendance_name):
 				"company": company,
 				"leaves": -flt(net_credited),
 				"from_date": att.attendance_date,
-				"to_date": att.attendance_date,
+				"to_date": allocation_to_date,
 				"is_carry_forward": 0,
 				"is_expired": 0,
 			}
@@ -183,7 +187,7 @@ def process_comp_off_for_attendance(attendance_name):
 				"company": att.company,
 				"leaves": flt(new_earning),
 				"from_date": att.attendance_date,
-				"to_date": att.attendance_date,
+				"to_date": allocation.to_date or att.attendance_date,
 				"is_carry_forward": 0,
 				"is_expired": 0,
 			}
@@ -221,6 +225,10 @@ def reverse_comp_off_for_attendance(attendance_name):
 	original_allocation_name = existing_entries[0].transaction_name
 	historical_leave_type = existing_entries[0].leave_type
 	company = att.company or existing_entries[0].company
+	allocation_to_date = (
+		frappe.db.get_value("Leave Allocation", original_allocation_name, "to_date")
+		or att.attendance_date
+	)
 
 	reversal_entry = frappe.get_doc(
 		{
@@ -234,12 +242,12 @@ def reverse_comp_off_for_attendance(attendance_name):
 			"company": company,
 			"leaves": -flt(net_credited),
 			"from_date": att.attendance_date,
-			"to_date": att.attendance_date,
+			"to_date": allocation_to_date,
 			"is_carry_forward": 0,
 			"is_expired": 0,
 		}
 	)
-	reversal_entry.insert(ignore_permissions=True)
+	reversal_entry.insert(ignore_permissions=True, ignore_links=True)
 	reversal_entry.submit()
 
 	if frappe.db.exists("Leave Allocation", original_allocation_name):

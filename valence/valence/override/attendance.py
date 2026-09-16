@@ -7,6 +7,10 @@ class Attendance(_Attendance):
 		if self.half_day_status == "":
 			self.half_day_status = None
 
+	def on_cancel(self):
+		self.ignore_linked_doctypes = ["Leave Ledger Entry"]
+		super().on_cancel()
+
 	def validate(self):
 		from erpnext.controllers.status_updater import validate_status
 

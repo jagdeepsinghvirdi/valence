@@ -493,6 +493,32 @@ def _extend_over_off_days(date_obj, off_days, step):
     return date_obj
 
 
+def _schedule_repeat_off_days(schedule_assignment):
+    """Off days implied by the Shift Schedule when the assignment field is blank."""
+    if not schedule_assignment:
+        return set()
+
+    from valence.valence.doc_events.shift_assignment import ALL_DAYS
+
+    shift_schedule = frappe.db.get_value(
+        "Shift Schedule Assignment", schedule_assignment, "shift_schedule"
+    )
+    if not shift_schedule:
+        return set()
+
+    repeat_on_days = {
+        d.lower()
+        for d in frappe.get_all("Assignment Rule Day", filters={"parent": shift_schedule}, pluck="day")
+        if d
+    }
+    if not repeat_on_days:
+        return set()
+
+    off_days = {day for day in ALL_DAYS if day not in repeat_on_days}
+
+    return off_days if len(off_days) == 1 else set()
+
+
 def _schedule_off_windows(employees):
     if not frappe.db.has_column("Shift Assignment", "shift_schedule_assignment"):
         return {}
@@ -505,6 +531,7 @@ def _schedule_off_windows(employees):
         .select(
             ShiftAssignment.employee,
             ShiftAssignment.custom_off_day,
+            ShiftAssignment.shift_schedule_assignment,
             Min(ShiftAssignment.start_date).as_("start_date"),
             Max(ShiftAssignment.end_date).as_("end_date"),
             Count(ShiftAssignment.name).as_("total"),
@@ -524,7 +551,9 @@ def _schedule_off_windows(employees):
 
     windows = {}
     for row in rows:
-        off_days = _weekly_off_days_from_assignment(row)
+        off_days = _weekly_off_days_from_assignment(row) or _schedule_repeat_off_days(
+            row.shift_schedule_assignment
+        )
         start = _extend_over_off_days(getdate(row.start_date), off_days, -1)
         end = row.end_date if row.bounded == row.total else None
         if end:
@@ -533,7 +562,7 @@ def _schedule_off_windows(employees):
         windows.setdefault(row.employee, []).append(
             frappe._dict(
                 {
-                    "custom_off_day": row.custom_off_day,
+                    "custom_off_day": row.custom_off_day or ",".join(sorted(off_days)),
                     "start_date": start,
                     "end_date": end,
                 }

@@ -365,8 +365,8 @@ def run():
 			)
 
 		ok(
-			"Legacy assignment with a blank weekly off shows no off day",
-			get_day_type(employee, "2026-05-15") is None,
+			"Legacy blank weekly off is derived from a single-off-day schedule",
+			get_day_type(employee, "2026-05-15") == "Weekly Off",
 			str(get_day_type(employee, "2026-05-15")),
 		)
 

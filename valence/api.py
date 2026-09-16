@@ -127,22 +127,23 @@ def get_attendance_punch_window(employee, attendance_date, shift=None):
     date_obj = getdate(attendance_date)
     shift = shift or get_applicable_shift(employee, date_obj)
     window_start, window_end = _get_shift_punch_window(shift, date_obj)
-    if not shift or _is_overnight_shift(shift):
+    if not shift:
         return window_start, window_end
 
     current = _shift_details_on(shift, date_obj)
     if not current:
         return window_start, window_end
 
+    is_overnight = _is_overnight_shift(shift)
+
     previous_date = add_days(date_obj, -1)
-    previous_shift = get_applicable_shift(employee, previous_date)
-    previous = _shift_details_on(previous_shift, previous_date)
+    previous = _shift_details_on(get_applicable_shift(employee, previous_date), previous_date)
     if previous:
-        if _is_overnight_shift(previous_shift):
-            boundary = _get_shift_punch_window(previous_shift, previous_date)[1]
-        else:
-            boundary = previous.end_datetime + (current.start_datetime - previous.end_datetime) / 2
-        window_start = max(window_start, min(boundary, current.actual_start))
+        boundary = min(
+            previous.end_datetime + (current.start_datetime - previous.end_datetime) / 2,
+            current.actual_start,
+        )
+        window_start = boundary if is_overnight else max(window_start, boundary)
 
     next_date = add_days(date_obj, 1)
     following = _shift_details_on(get_applicable_shift(employee, next_date), next_date)

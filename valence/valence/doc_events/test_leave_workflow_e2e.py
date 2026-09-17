@@ -505,7 +505,7 @@ def _ensure_employee(full_name, user_id, company, leave_approver=None, holiday_l
 			"last_name": parts[1] if len(parts) > 1 else "",
 			"gender": "Male",
 			"date_of_birth": "1990-01-01",
-			"date_of_joining": nowdate(),
+			"date_of_joining": add_days(nowdate(), -365),
 			"status": "Active",
 			"company": company,
 			"user_id": user_id,

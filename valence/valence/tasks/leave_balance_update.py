@@ -164,6 +164,14 @@ def credit_leave_for_employee(employee, company, leave_type, divisor, working_da
 	precision = allocation.precision("total_leaves_allocated")
 	earned_leaves = flt(earned_leaves, precision)
 
+	# db_set (not .save()) is deliberate here: HRMS's Leave Allocation
+	# on_update_after_submit() -> validate_earned_leave_update() hard-blocks
+	# any update to total_leaves_allocated on submitted allocations where the
+	# Leave Type has is_earned_leave=1 (it expects earned leave to be granted
+	# only via its own Leave Policy scheduler). This quarterly job needs to
+	# credit leave for types like EL/CL/SL regardless of that flag, so we
+	# bypass the hook chain and write the ledger entry ourselves below,
+	# mirroring what create_leave_ledger_entry does in HRMS core.
 	allocation.db_set(
 		"total_leaves_allocated",
 		flt(allocation.total_leaves_allocated + earned_leaves, precision),

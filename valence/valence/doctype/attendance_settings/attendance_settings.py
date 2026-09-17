@@ -18,6 +18,8 @@ DEFAULT_COMP_OFF_RULES = [
 	{"attendance_code": "2P/A", "comp_off_days": 0.5, "enabled": 1},
 ]
 
+VALID_COMP_OFF_CODES = {r["attendance_code"] for r in DEFAULT_COMP_OFF_RULES}
+
 
 class AttendanceSettings(Document):
 	def validate(self):
@@ -38,6 +40,12 @@ class AttendanceSettings(Document):
 					)
 				)
 			if attendance_code:
+				if attendance_code not in VALID_COMP_OFF_CODES:
+					frappe.throw(
+						frappe._("Invalid Attendance Code '{0}' in Comp Off Rules. Must be one of: {1}.").format(
+							attendance_code, ", ".join(sorted(VALID_COMP_OFF_CODES))
+						)
+					)
 				if attendance_code in seen_codes:
 					frappe.throw(
 						frappe._("Duplicate Comp Off Rule for attendance code {0}.").format(

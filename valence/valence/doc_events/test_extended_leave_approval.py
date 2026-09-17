@@ -620,7 +620,6 @@ def run():
 			frappe.db.commit()
 
 		# --- Desk transitions (get_transitions) hide Approve for wrong/self users ---
-		import frappe.model.workflow as workflow_mod
 		from valence.valence.approval_hierarchy import share_with_users
 
 		# Ensure emp hierarchy is back to assigned HOD after department-approver case

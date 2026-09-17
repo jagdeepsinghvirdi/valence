@@ -1,5 +1,5 @@
 (() => {
-  // ../../../../Documents/techno/valence/valence/public/js/transaction.js
+  // ../valence/valence/public/js/transaction.js
   erpnext.TransactionController = class TransactionController extends erpnext.TransactionController {
     make_quality_inspection() {
       let data = [];
@@ -151,5 +151,64 @@
       }
     }
   };
+
+  // ../valence/valence/public/js/workflow_approval.js
+  (function() {
+    const DOCTYPES = /* @__PURE__ */ new Set(["Leave Application", "Attendance Request"]);
+    const APPROVAL_ACTIONS = /* @__PURE__ */ new Set(["Approve", "Reject"]);
+    const States = frappe.ui.form.States;
+    if (!States || States._valence_hierarchy_patched) {
+      return;
+    }
+    const original_show_actions = States.prototype.show_actions;
+    States.prototype.show_actions = function() {
+      const frm = this.frm;
+      if (!DOCTYPES.has(frm.doctype)) {
+        return original_show_actions.call(this);
+      }
+      if (frm.doc.__unsaved === 1) {
+        return;
+      }
+      let added = false;
+      const me = this;
+      function has_approval_access(transition) {
+        const user = frappe.session.user;
+        if (user === "Administrator" || transition.allow_self_approval || APPROVAL_ACTIONS.has(transition.action)) {
+          return true;
+        }
+        return user !== frm.doc.owner;
+      }
+      frappe.workflow.get_transitions(frm.doc).then((transitions) => {
+        frm.page.clear_actions_menu();
+        transitions.forEach((transition) => {
+          if (frappe.user_roles.includes(transition.allowed) && has_approval_access(transition)) {
+            added = true;
+            frm.page.add_action_item(__(transition.action), function() {
+              frappe.dom.freeze();
+              frm.selected_workflow_action = transition.action;
+              if (!frappe.ui.form.check_mandatory(frm)) {
+                return frappe.dom.unfreeze();
+              }
+              frm.script_manager.trigger("before_workflow_action").then(() => {
+                frappe.xcall("frappe.model.workflow.apply_workflow", {
+                  doc: frm.doc,
+                  action: transition.action
+                }).then((doc) => {
+                  frappe.model.sync(doc);
+                  me.frm.refresh();
+                  frm.selected_workflow_action = null;
+                  frm.script_manager.trigger("after_workflow_action");
+                }).finally(() => {
+                  frappe.dom.unfreeze();
+                });
+              });
+            });
+          }
+        });
+        me.setup_btn(added);
+      });
+    };
+    States._valence_hierarchy_patched = true;
+  })();
 })();
-//# sourceMappingURL=valence.bundle.F54GPX4N.js.map
+//# sourceMappingURL=valence.bundle.YV3WDCXU.js.map

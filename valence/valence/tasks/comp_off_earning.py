@@ -1,6 +1,8 @@
 # Copyright (c) 2026, finbyz tech and contributors
 # For license information, please see license.txt
 
+from datetime import date
+
 import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, today
@@ -61,7 +63,7 @@ def get_comp_off_earned(attendance, context=None):
 
 	settings_doc = frappe.get_single("Attendance Settings")
 	rules = settings_doc.get("comp_off_rules")
-	if rules is None:
+	if not rules:
 		rules = DEFAULT_COMP_OFF_RULES
 
 	return _match_comp_off_rule(code, rules, enabled_setting=comp_off_enabled)
@@ -162,6 +164,7 @@ def process_comp_off_for_attendance(attendance_name):
 		original_allocation_name = existing_entries[0].transaction_name
 		historical_leave_type = existing_entries[0].leave_type
 		company = att.company or existing_entries[0].company
+		rev_to_date = frappe.db.get_value("Leave Allocation", original_allocation_name, "to_date") or att.attendance_date
 
 		reversal_entry = frappe.get_doc(
 			{
@@ -175,7 +178,7 @@ def process_comp_off_for_attendance(attendance_name):
 				"company": company,
 				"leaves": -flt(net_credited),
 				"from_date": att.attendance_date,
-				"to_date": att.attendance_date,
+				"to_date": rev_to_date,
 				"is_carry_forward": 0,
 				"is_expired": 0,
 			}
@@ -214,7 +217,7 @@ def process_comp_off_for_attendance(attendance_name):
 				"company": att.company,
 				"leaves": flt(new_earning),
 				"from_date": att.attendance_date,
-				"to_date": att.attendance_date,
+				"to_date": allocation.to_date,
 				"is_carry_forward": 0,
 				"is_expired": 0,
 			}
@@ -253,6 +256,7 @@ def reverse_comp_off_for_attendance(attendance_name):
 	original_allocation_name = existing_entries[0].transaction_name
 	historical_leave_type = existing_entries[0].leave_type
 	company = att.company or existing_entries[0].company
+	rev_to_date = frappe.db.get_value("Leave Allocation", original_allocation_name, "to_date") or att.attendance_date
 
 	reversal_entry = frappe.get_doc(
 		{
@@ -266,7 +270,7 @@ def reverse_comp_off_for_attendance(attendance_name):
 			"company": company,
 			"leaves": -flt(net_credited),
 			"from_date": att.attendance_date,
-			"to_date": att.attendance_date,
+			"to_date": rev_to_date,
 			"is_carry_forward": 0,
 			"is_expired": 0,
 		}
@@ -289,6 +293,8 @@ def process_comp_off_earning(from_date, to_date, employee=None):
 	"""
 	Batch process Comp Off earning for submitted Attendance records across a date range.
 	Uses savepoints per attendance so failure on one record rolls back only that record.
+	Failures are tracked and returned so the caller can decide how far to advance
+	the last-processed-date marker (see run_daily_comp_off_earning).
 	"""
 	filters = {
 		"docstatus": 1,
@@ -297,25 +303,106 @@ def process_comp_off_earning(from_date, to_date, employee=None):
 	if employee:
 		filters["employee"] = employee
 
-	attendances = frappe.get_all("Attendance", filters=filters, pluck="name")
-	for att_name in attendances:
-		sp = f"comp_off_{att_name.replace('-', '_')}"
+	attendances = frappe.get_all(
+		"Attendance", filters=filters, fields=["name", "attendance_date"], order_by="attendance_date asc"
+	)
+	failed_dates = set()
+	processed_names = []
+	for att in attendances:
+		sp = f"comp_off_{att.name.replace('-', '_')}"
 		try:
 			frappe.db.savepoint(sp)
-			process_comp_off_for_attendance(att_name)
+			process_comp_off_for_attendance(att.name)
+			processed_names.append(att.name)
 		except Exception:
 			frappe.db.rollback(save_point=sp)
-			frappe.log_error(frappe.get_traceback(), f"Comp Off Earning failed for Attendance {att_name}")
+			frappe.log_error(frappe.get_traceback(), f"Comp Off Earning failed for Attendance {att.name}")
+			failed_dates.add(getdate(att.attendance_date))
 
-	return {"processed": len(attendances), "attendances": attendances}
+	return {
+		"processed": len(processed_names),
+		"attendances": processed_names,
+		"failed_dates": failed_dates,
+	}
+
+
+
+MAX_CATCHUP_DAYS = 30
+"""Safety cap on catch-up window (days) if the scheduler was down for a long
+time. Prevents a single run from silently trying to reprocess months of
+history -- beyond this cap we still catch up, but only the most recent
+MAX_CATCHUP_DAYS, and log a warning so the gap is visible instead of silent."""
+
+
 
 
 def run_daily_comp_off_earning():
 	"""
-	Scheduled task entry point. Runs daily after Attendance off-day processing for yesterday's records.
+	Scheduled task entry point. Runs daily after Attendance off-day processing.
+
+	Catches up on any days missed since the last successful run (scheduler
+	downtime, cron retry gaps, etc.) instead of only processing yesterday.
+	process_comp_off_for_attendance() is idempotent (see its docstring), so
+	re-processing already-handled attendance in the catch-up window is safe
+	and cheap -- it no-ops when net_credited already matches new_earning.
+
+	If any individual Attendance fails during the run, the last-processed-date
+	marker only advances up to the day before the earliest failure, so the
+	next scheduled run retries starting from that point instead of silently
+	skipping it forever.
 	"""
-	yesterday = add_days(today(), -1)
-	return process_comp_off_earning(from_date=yesterday, to_date=yesterday)
+	yesterday = getdate(add_days(today(), -1))
+
+	last_processed = frappe.db.get_single_value(
+		"Attendance Settings", "comp_off_last_processed_date"
+	)
+
+	if last_processed and last_processed != date(1, 1, 1):
+		from_date = add_days(getdate(last_processed), 1)
+		if from_date > yesterday:
+			return {"processed": 0, "attendances": [], "from_date": None, "to_date": None}
+
+		days_missed = (getdate(yesterday) - from_date).days + 1
+		if days_missed > MAX_CATCHUP_DAYS:
+			frappe.log_error(
+				title="Comp Off Earning: large catch-up window",
+				message=(
+					f"Comp Off earning last processed {last_processed}, which is "
+					f"{days_missed} days behind. Capping catch-up to the most recent "
+					f"{MAX_CATCHUP_DAYS} days. Older days in this gap will not be "
+					f"backfilled automatically -- review manually if needed."
+				),
+			)
+			from_date = add_days(getdate(yesterday), -(MAX_CATCHUP_DAYS - 1))
+	else:
+		from_date = yesterday
+
+	result = process_comp_off_earning(from_date=from_date, to_date=yesterday)
+
+	failed_dates = result.get("failed_dates") or set()
+	if failed_dates:
+		earliest_failed = min(failed_dates)
+		new_marker = add_days(getdate(earliest_failed), -1)
+		frappe.log_error(
+			title="Comp Off Earning: run completed with failures",
+			message=(
+				f"{len(failed_dates)} attendance date(s) failed during this run. "
+				f"Last-processed-date marker set to {new_marker} (day before earliest "
+				f"failure {earliest_failed}) instead of {yesterday}, so the next run "
+				f"retries from there. Failed dates: {sorted(failed_dates)}."
+			),
+		)
+	else:
+		new_marker = yesterday
+
+	frappe.db.set_single_value(
+		"Attendance Settings", "comp_off_last_processed_date", new_marker, update_modified=False
+	)
+	frappe.db.commit()
+
+	result["from_date"] = from_date
+	result["to_date"] = yesterday
+	return result
 
 
 def run():
@@ -409,6 +496,7 @@ def _ensure_comp_off_allocation(employee, leave_type, attendance_date, company=N
 			"description": _("Auto-created for Compensatory Off Earning"),
 		}
 	)
+	alloc.flags.ignore_validate = True
 	alloc.insert(ignore_permissions=True)
 	alloc.submit()
 	return alloc

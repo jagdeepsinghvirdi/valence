@@ -206,23 +206,28 @@ def _may_act_at_hod_stage(user: str, employee: str | None, doc=None) -> bool:
 
 
 def _is_department_leave_approver(user: str, employee: str | None) -> bool:
-	"""Leave Approver role + same department as the leave applicant."""
 	if not employee or not user_has_any_role(user, (LEAVE_APPROVER_ROLE,)):
 		return False
 
-	approver_emp = frappe.db.get_value(
-		"Employee",
-		{"user_id": user},
-		["name", "department"],
-		as_dict=True,
-	)
-	if not approver_emp or not approver_emp.department:
+	emp_leave_approver = frappe.db.get_value("Employee", employee, "leave_approver")
+	emp_dept = frappe.db.get_value("Employee", employee, "department")
+	if not emp_dept:
 		return False
 
-	emp_dept = frappe.db.get_value("Employee", employee, "department")
-	return bool(emp_dept and emp_dept == approver_emp.department)
+	approver_emp = frappe.db.get_value("Employee", {"user_id": user}, ["department"], as_dict=True)
+	if not approver_emp or approver_emp.department != emp_dept:
+		return False
+
+	if not emp_leave_approver:
+		designated = frappe.db.get_value(
+			"Department Approver",
+			{"parent": emp_dept, "parentfield": "leave_approvers", "idx": 1},
+			"approver",
+		)
+		return user == designated
 
 
+	return True
 def _may_act_at_super_hod_stage(user: str, employee: str | None) -> bool:
 	if user == "Administrator":
 		return True

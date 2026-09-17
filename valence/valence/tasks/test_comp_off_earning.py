@@ -627,6 +627,7 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 
 	def test_run_daily_comp_off_earning_processes_yesterday(self):
 		"""E37: run_daily_comp_off_earning() processes the intended previous-day Attendance."""
+		frappe.db.set_single_value("Attendance Settings", "comp_off_last_processed_date", None)
 		yesterday = add_days(nowdate(), -1)
 		att = self._make_submitted_attendance(yesterday, status="Present", hours=8.0)
 

@@ -4,7 +4,7 @@
  "creation": "2025-04-17 14:19:56.309236",
  "doctype": "DocType",
  "engine": "InnoDB",
-  "field_order": [
+ "field_order": [
   "section_break_fptb",
   "use_late_coming_rules",
   "short_leave_logic",
@@ -30,7 +30,7 @@
   {
    "fieldname": "section_break_fptb",
    "fieldtype": "Section Break",
-   "label": "Automatic Short Leave (Point Deduction) — Legacy"
+   "label": "Automatic Short Leave (Point Deduction) \u2014 Legacy"
   },
   {
    "fieldname": "short_leave_logic",
@@ -45,7 +45,7 @@
   },
   {
    "default": "0",
-   "description": "If checked, apply late coming rules (Shift Management) — the legacy automatic point-deduction system. Otherwise, use standard attendance logic. NOTE: as of Aug 2026 policy, this is being superseded by the Short Leave Application system below; leave unchecked on new setups.",
+   "description": "If checked, apply late coming rules (Shift Management) \u2014 the legacy automatic point-deduction system. Otherwise, use standard attendance logic. NOTE: as of Aug 2026 policy, this is being superseded by the Short Leave Application system below; leave unchecked on new setups.",
    "fieldname": "use_late_coming_rules",
    "fieldtype": "Check",
    "label": "Use Late Coming Rules (Legacy)"
@@ -57,7 +57,7 @@
   },
   {
    "default": "3",
-   "description": "Working days after the leave/request END date (holidays and weekly offs excluded). Employee can create backdated Leave or OD/WFH only until this many working days have passed after to_date. Does not apply to approval — HOD / Super HOD can approve anytime. HR can override. Default 3.",
+   "description": "Working days after the leave/request END date (holidays and weekly offs excluded). Employee can create backdated Leave or OD/WFH only until this many working days have passed after to_date. Does not apply to approval \u2014 HOD / Super HOD can approve anytime. HR can override. Default 3.",
    "fieldname": "leave_creation_window_days",
    "fieldtype": "Int",
    "label": "Backdated Creation Window (Days)",
@@ -97,7 +97,7 @@
    "description": "Maximum number of Personal Short Leaves an employee can apply for in a calendar month.",
    "fieldname": "short_leave_personal_monthly_cap",
    "fieldtype": "Int",
-   "label": "Personal Short Leave — Monthly Cap",
+   "label": "Personal Short Leave \u2014 Monthly Cap",
    "non_negative": 1,
    "reqd": 1
   },
@@ -106,7 +106,7 @@
    "description": "Maximum number of Official Short Leaves per calendar month. Set to 0 for unlimited (current policy: unlimited).",
    "fieldname": "short_leave_official_monthly_cap",
    "fieldtype": "Int",
-   "label": "Official Short Leave — Monthly Cap (0 = Unlimited)",
+   "label": "Official Short Leave \u2014 Monthly Cap (0 = Unlimited)",
    "non_negative": 1
   },
   {
@@ -141,6 +141,13 @@
    "fieldname": "comp_off_auto_credit",
    "fieldtype": "Check",
    "label": "Auto Credit Comp Off on Attendance Submit/Update"
+  },
+  {
+   "fieldname": "comp_off_last_processed_date",
+   "fieldtype": "Date",
+   "label": "Comp Off Last Processed Date",
+   "read_only": 1,
+   "description": "Last attendance date successfully processed by the daily Comp Off earning job. Used to catch up on any missed days if the scheduler was down."
   },
   {
    "fieldname": "column_break_comp_off",

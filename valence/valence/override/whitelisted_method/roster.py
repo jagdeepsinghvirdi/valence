@@ -20,7 +20,87 @@ def get_events(month_start, month_end, employee_filters, shift_filters):
     for employee, off_days in build_weekly_offs(day_types).items():
         events.setdefault(employee, []).extend(off_days)
 
+    apply_left_events(events, month_start, month_end)
+
     return events
+
+
+def apply_left_events(events, month_start, month_end):
+    """
+    Roster cells for employees with status 'Left' in Shift Assignment
+    must display 'Left' as a blocked cell for the applicable dates.
+    """
+    if not events:
+        return
+
+    from datetime import timedelta
+
+    m_start = getdate(month_start)
+    m_end = getdate(month_end)
+
+    target_employees = list(events.keys())
+    if not target_employees:
+        return
+
+    filters = {
+        "docstatus": 1,
+        "status": "Left",
+        "start_date": ["<=", m_end],
+        "employee": ["in", target_employees],
+    }
+
+    left_assignments = frappe.get_all(
+        "Shift Assignment",
+        filters=filters,
+        or_filters=[["end_date", ">=", m_start], ["end_date", "is", "not set"]],
+        fields=["name", "employee", "start_date", "end_date"],
+        order_by="start_date asc",
+    )
+
+    for assign in left_assignments:
+        emp = assign.employee
+        cur = max(getdate(assign.start_date), m_start)
+        assign_end = getdate(assign.end_date) if assign.end_date else m_end
+        end = min(assign_end, m_end)
+
+        left_dates = set()
+        while cur <= end:
+            left_dates.add(str(cur))
+            cur += timedelta(days=1)
+
+        if not left_dates:
+            continue
+
+        # Strip regular shifts and weekly offs on Left dates
+        existing = events.get(emp, [])
+        filtered = [
+            ev for ev in existing
+            if not _is_date_in_left_dates(ev, left_dates)
+        ]
+
+        # Inject Left blocked event for each date
+        for d_str in sorted(left_dates):
+            filtered.append(
+                {
+                    "holiday": f"left-{emp}-{d_str}",
+                    "holiday_date": d_str,
+                    "description": "Left",
+                }
+            )
+
+        events[emp] = filtered
+
+
+def _is_date_in_left_dates(event, left_dates):
+    # Holiday / weekly off date
+    if "holiday_date" in event and str(event["holiday_date"]) in left_dates:
+        return True
+    # Shift start date
+    if "start_date" in event:
+        start_dt = str(getdate(event["start_date"]))
+        if start_dt in left_dates:
+            return True
+    return False
 
 
 def _is_weekly_off_holiday(event):

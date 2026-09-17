@@ -8,6 +8,13 @@ CORRECTION_ROLES = ("HR Manager", "System Manager")
 
 
 class ShiftAssignment(HRMSShiftAssignment):
+	def validate_overlapping_shifts(self):
+		# Left and Inactive assignments do not represent working shift timing overlaps
+		if self.status in ("Inactive", "Left"):
+			return
+
+		super().validate_overlapping_shifts()
+
 	def on_cancel(self):
 		if self.is_past_duplicate_correction():
 			self.db_set("status", "Inactive", update_modified=False)

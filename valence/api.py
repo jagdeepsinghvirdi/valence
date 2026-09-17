@@ -448,21 +448,46 @@ def get_applicable_shift_assignment(employee, date_obj):
             "docstatus": 1,
         },
         or_filters=[["end_date", ">=", date_obj], ["end_date", "is", "not set"]],
-        fields=["name", "shift_type", "custom_off_day", "start_date", "end_date"],
+        fields=["name", "shift_type", "status", "custom_off_day", "start_date", "end_date"],
         order_by="start_date desc, creation desc",
-        limit_page_length=1,
     )
 
-    return rows[0] if rows else None
+    if not rows:
+        return None
+
+    # If any covering assignment marks the employee as Left, Left takes precedence
+    # over any overlapping Active assignments that were not ended.
+    for row in rows:
+        if row.status == "Left":
+            return row
+
+    return rows[0]
 
 
 def get_applicable_shift(employee, date_obj):
     """Applicable Shift Type for employee/date: Shift Assignment first, then default shift."""
-    assignment = get_applicable_shift_assignment(employee, date_obj)
-    if assignment and assignment.get("shift_type"):
-        return assignment.get("shift_type")
+    if not employee or not date_obj:
+        return None
 
-    if not employee:
+    date_obj = getdate(date_obj)
+    assignment = get_applicable_shift_assignment(employee, date_obj)
+    if assignment:
+        if assignment.get("status") == "Left":
+            return None
+        if assignment.get("shift_type"):
+            return assignment.get("shift_type")
+
+    # If employee has been marked Left on or before date_obj, never fall back to default_shift
+    has_left = frappe.db.exists(
+        "Shift Assignment",
+        {
+            "employee": employee,
+            "docstatus": 1,
+            "status": "Left",
+            "start_date": ["<=", date_obj],
+        },
+    )
+    if has_left:
         return None
 
     return frappe.db.get_value("Employee", employee, "default_shift")
@@ -583,6 +608,7 @@ def _off_day_periods(employees, start=None, end=None):
     filters = {
         "employee": ["in", employees],
         "docstatus": 1,
+        "status": ["not in", ["Inactive", "Left"]],
         "shift_schedule_assignment": ["is", "not set"],
     }
     if end:

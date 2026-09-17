@@ -647,9 +647,11 @@ def get_day_type_map(employees, start_date, end_date):
        - If assigned, shift weekly off overrides the Holiday List weekly off.
        - Matches -> "Weekly Off"
        - Does not match -> None (working day, even if Sunday is on Holiday List)
-    3. Holiday List weekly off (entry with weekly_off == 1) -> "Weekly Off"
-       (only applies when no Shift Assignment weekly off is configured)
-    4. Otherwise -> None
+    3. Active Shift Assignment with no custom_off_day:
+       - Suppresses Holiday List weekly off -> None (working day)
+    4. Holiday List weekly off (entry with weekly_off == 1) -> "Weekly Off"
+       (only applies when no Shift Assignment covers the date)
+    5. Otherwise -> None
     """
     from frappe.utils import add_days
 
@@ -691,6 +693,33 @@ def get_day_type_map(employees, start_date, end_date):
 
     periods = _off_day_periods(employees, start, end)
 
+    # Pre-load shift assignment coverage so we can suppress Holiday List
+    # weekly offs when an assignment governs a date but has no custom_off_day.
+    assignment_rows = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": ["in", employees],
+            "docstatus": 1,
+            "start_date": ["<=", end],
+        },
+        or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
+        fields=["employee", "start_date", "end_date"],
+        order_by="start_date desc, creation desc",
+    )
+    # Group by employee for quick per-day lookup
+    assignments_by_emp = {}
+    for row in assignment_rows:
+        assignments_by_emp.setdefault(row.employee, []).append(row)
+
+    def has_assignment_on(employee, date_obj):
+        for asgn in assignments_by_emp.get(employee, []):
+            if getdate(asgn.start_date) > date_obj:
+                continue
+            if asgn.end_date and getdate(asgn.end_date) < date_obj:
+                continue
+            return True
+        return False
+
     def off_days_for(employee, date_obj):
         return _off_days_on(periods.get(employee), date_obj)
 
@@ -718,7 +747,10 @@ def get_day_type_map(employees, start_date, end_date):
                 else:
                     day_type = None
             elif is_holiday_weekly_off:
-                day_type = "Weekly Off"
+                # Suppress the Holiday List weekly off when a Shift Assignment
+                # governs this date (even if its custom_off_day is blank).
+                if not has_assignment_on(employee, day):
+                    day_type = "Weekly Off"
 
             result[(employee, day)] = day_type
         day = add_days(day, 1)
@@ -748,9 +780,11 @@ def get_day_type(employee, attendance_date):
        - If assigned, shift weekly off overrides the Holiday List weekly off.
        - Matches -> "Weekly Off"
        - Does not match -> None (working day, even if Sunday is on Holiday List)
-    3. Holiday List weekly off (entry with weekly_off == 1) -> "Weekly Off"
-       (only applies when no Shift Assignment weekly off is configured)
-    4. Otherwise -> None
+    3. Active Shift Assignment with no custom_off_day:
+       - Suppresses Holiday List weekly off -> None (working day)
+    4. Holiday List weekly off (entry with weekly_off == 1) -> "Weekly Off"
+       (only applies when no Shift Assignment covers the date)
+    5. Otherwise -> None
     """
     if not employee or not attendance_date:
         return None
@@ -779,6 +813,12 @@ def get_day_type(employee, attendance_date):
     if shift_off_days:
         if weekday in shift_off_days:
             return "Weekly Off"
+        return None
+
+    # When a Shift Assignment governs this date, it is the source of truth
+    # for weekly offs — even if its custom_off_day is blank (meaning no off
+    # day at all).  The Holiday List weekly off must NOT leak through.
+    if get_applicable_shift_assignment(employee, date_obj):
         return None
 
     if holiday_list and holiday and cint(holiday.weekly_off):

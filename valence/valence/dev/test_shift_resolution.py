@@ -488,6 +488,72 @@ def run():
 		_cleanup(employee)
 
 		print("")
+		print("-- No-off-day assignment vs Holiday List " + "-" * 31)
+
+		# Regression: a Shift Assignment with no custom_off_day should
+		# suppress the Holiday List weekly off during the assignment.
+		_cleanup(employee)
+		frappe.db.set_value(
+			"Employee",
+			employee,
+			"holiday_list",
+			_ensure_sunday_holiday_list(),
+			update_modified=False,
+		)
+		_make_assignment(employee, NO_OFF_SHIFT, None, "2026-09-01", "2026-09-30")
+
+		ok(
+			"No-off-day assignment suppresses Holiday List Sunday (single)",
+			get_day_type(employee, "2026-09-06") is None,
+			str(get_day_type(employee, "2026-09-06")),
+		)
+		ok(
+			"No-off-day assignment: another Sunday also suppressed (single)",
+			get_day_type(employee, "2026-09-13") is None,
+			str(get_day_type(employee, "2026-09-13")),
+		)
+		ok(
+			"Holiday List Sunday resumes after no-off-day assignment (single)",
+			get_day_type(employee, "2026-10-04") == "Weekly Off",
+			str(get_day_type(employee, "2026-10-04")),
+		)
+
+		no_off_map = get_day_type_map([employee], "2026-09-01", "2026-10-04")
+		ok(
+			"No-off-day assignment suppresses Holiday List Sunday (bulk)",
+			no_off_map.get((employee, getdate("2026-09-06"))) is None
+			and no_off_map.get((employee, getdate("2026-09-13"))) is None,
+			str([
+				no_off_map.get((employee, getdate("2026-09-06"))),
+				no_off_map.get((employee, getdate("2026-09-13"))),
+			]),
+		)
+		ok(
+			"Holiday List Sunday resumes after no-off-day assignment (bulk)",
+			no_off_map.get((employee, getdate("2026-10-04"))) == "Weekly Off",
+			str(no_off_map.get((employee, getdate("2026-10-04")))),
+		)
+
+		from valence.valence.override.whitelisted_method.roster import get_weekly_offs as _get_weekly_offs
+
+		sept_no_off = _get_weekly_offs("2026-09-01", "2026-09-30", {"name": employee})
+		sept_no_off_dates = {row["holiday_date"] for row in sept_no_off.get(employee, [])}
+		ok(
+			"Roster suppresses Sunday during no-off-day assignment",
+			"2026-09-06" not in sept_no_off_dates and "2026-09-13" not in sept_no_off_dates,
+			str(sorted(sept_no_off_dates)),
+		)
+
+		frappe.db.set_value(
+			"Employee",
+			employee,
+			"holiday_list",
+			previous_holiday_list,
+			update_modified=False,
+		)
+		_cleanup(employee)
+
+		print("")
 		print("-- Overnight shift and half-day thresholds " + "-" * 28)
 
 		from valence.valence.doc_events.attendance import (

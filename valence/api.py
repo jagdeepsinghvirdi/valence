@@ -617,7 +617,7 @@ def _off_day_periods(employees, start=None, end=None):
     return periods
 
 
-def _off_days_on(periods, date_obj):
+def _covering_assignment_on(periods, date_obj):
     date_obj = getdate(date_obj)
 
     for row in periods or []:
@@ -625,7 +625,15 @@ def _off_days_on(periods, date_obj):
             continue
         if row.end_date and getdate(row.end_date) < date_obj:
             continue
-        return _weekly_off_days_from_assignment(row)
+        return row
+
+    return None
+
+
+def _off_days_on(periods, date_obj):
+    assignment = _covering_assignment_on(periods, date_obj)
+    if assignment:
+        return _weekly_off_days_from_assignment(assignment)
 
     return set()
 
@@ -738,10 +746,11 @@ def get_day_type_map(employees, start_date, end_date):
                 else:
                     is_public_holiday = True
 
-            shift_off_days = off_days_for(employee, day)
+            covering_assignment = _covering_assignment_on(periods.get(employee), day)
             if is_public_holiday:
                 day_type = "Holiday"
-            elif shift_off_days:
+            elif covering_assignment:
+                shift_off_days = _weekly_off_days_from_assignment(covering_assignment)
                 if weekday in shift_off_days:
                     day_type = "Weekly Off"
                 else:
@@ -809,8 +818,9 @@ def get_day_type(employee, attendance_date):
         if holiday and not cint(holiday.weekly_off):
             return "Holiday"
 
-    shift_off_days = get_shift_weekly_off_days(employee, date_obj)
-    if shift_off_days:
+    covering_assignment = _covering_assignment_on(_off_day_periods([employee]).get(employee), date_obj)
+    if covering_assignment:
+        shift_off_days = _weekly_off_days_from_assignment(covering_assignment)
         if weekday in shift_off_days:
             return "Weekly Off"
         return None

@@ -276,6 +276,12 @@ def run():
 			get_day_type(employee, "2026-06-07") is None,
 			str(get_day_type(employee, "2026-06-07")),
 		)
+		day_map_no_off = get_day_type_map([employee], "2026-06-01", "2026-06-07")
+		ok(
+			"Bulk day map agrees Sunday inside no-weekly-off assignment is a working day",
+			day_map_no_off.get((employee, getdate("2026-06-07"))) is None,
+			str(day_map_no_off.get((employee, getdate("2026-06-07")))),
+		)
 
 		print("")
 		print("-- Roster weekly offs " + "-" * 49)
@@ -488,11 +494,15 @@ def run():
 		_cleanup(employee)
 
 		print("")
-		print("-- No-off-day assignment vs Holiday List " + "-" * 31)
+		print("-- Multi-assignment sequence & date edits " + "-" * 32)
 
-		# Regression: a Shift Assignment with no custom_off_day should
-		# suppress the Holiday List weekly off during the assignment.
-		_cleanup(employee)
+		# Reproduce user scenario:
+		# Default Weekly Off: Sunday
+		# Shift assignments in June 2026:
+		# 1st to 2nd: Weekly Off = Wednesday
+		# 4th to 9th: Weekly Off = Wednesday
+		# 11th to 18th: Weekly Off = Wednesday
+		# 20th onwards: Weekly Off = Wednesday
 		frappe.db.set_value(
 			"Employee",
 			employee,
@@ -500,48 +510,197 @@ def run():
 			_ensure_sunday_holiday_list(),
 			update_modified=False,
 		)
-		_make_assignment(employee, NO_OFF_SHIFT, None, "2026-09-01", "2026-09-30")
+
+		_make_assignment(employee, TEMP_SHIFT, "Wednesday", "2026-06-01", "2026-06-02")
+		a2 = _make_assignment(employee, TEMP_SHIFT, "Wednesday", "2026-06-04", "2026-06-09")
+		a3 = _make_assignment(employee, TEMP_SHIFT, "Wednesday", "2026-06-11", "2026-06-18")
+		_make_assignment(employee, TEMP_SHIFT, "Wednesday", "2026-06-20", None)
+
+		# Initial state checks
+		# Covered dates: June 1, 2, 4, 5, 6, 7, 8, 9, 11-18, 20-30
+		# Gaps: June 3, June 10, June 19
+		# On June 3 (gap, Wednesday): not covered by assignment -> Default holiday list (Sunday) applies -> June 3 is working day (None)
+		# On June 7 (inside 4-9, Sunday): covered by assignment (WO=Wednesday) -> Sunday is working day (None)
+		# On June 10 (gap, Wednesday): gap -> working day (None)
+		# On June 14 (inside 11-18, Sunday): covered by assignment -> Sunday is working day (None)
+		# On June 17 (inside 11-18, Wednesday): covered by assignment -> Weekly Off
+		# On June 19 (gap, Friday): working day (None)
+		# On June 21 (inside 20 onwards, Sunday): covered by assignment -> Sunday is working day (None)
+		# On June 24 (inside 20 onwards, Wednesday): covered by assignment -> Weekly Off
 
 		ok(
-			"No-off-day assignment suppresses Holiday List Sunday (single)",
-			get_day_type(employee, "2026-09-06") is None,
-			str(get_day_type(employee, "2026-09-06")),
+			"Initial sequence: 3rd is a gap day (not WO)",
+			get_day_type(employee, "2026-06-03") is None,
+			str(get_day_type(employee, "2026-06-03")),
 		)
 		ok(
-			"No-off-day assignment: another Sunday also suppressed (single)",
-			get_day_type(employee, "2026-09-13") is None,
-			str(get_day_type(employee, "2026-09-13")),
+			"Initial sequence: 10th is a gap day (not WO)",
+			get_day_type(employee, "2026-06-10") is None,
+			str(get_day_type(employee, "2026-06-10")),
 		)
 		ok(
-			"Holiday List Sunday resumes after no-off-day assignment (single)",
-			get_day_type(employee, "2026-10-04") == "Weekly Off",
-			str(get_day_type(employee, "2026-10-04")),
-		)
-
-		no_off_map = get_day_type_map([employee], "2026-09-01", "2026-10-04")
-		ok(
-			"No-off-day assignment suppresses Holiday List Sunday (bulk)",
-			no_off_map.get((employee, getdate("2026-09-06"))) is None
-			and no_off_map.get((employee, getdate("2026-09-13"))) is None,
-			str([
-				no_off_map.get((employee, getdate("2026-09-06"))),
-				no_off_map.get((employee, getdate("2026-09-13"))),
-			]),
+			"Initial sequence: 7th Sunday inside 4-9 assignment is NOT Weekly Off",
+			get_day_type(employee, "2026-06-07") is None,
+			str(get_day_type(employee, "2026-06-07")),
 		)
 		ok(
-			"Holiday List Sunday resumes after no-off-day assignment (bulk)",
-			no_off_map.get((employee, getdate("2026-10-04"))) == "Weekly Off",
-			str(no_off_map.get((employee, getdate("2026-10-04")))),
+			"Initial sequence: 17th Wednesday inside 11-18 is Weekly Off",
+			get_day_type(employee, "2026-06-17") == "Weekly Off",
+			str(get_day_type(employee, "2026-06-17")),
+		)
+		ok(
+			"Initial sequence: 24th Wednesday inside 20 onwards is Weekly Off",
+			get_day_type(employee, "2026-06-24") == "Weekly Off",
+			str(get_day_type(employee, "2026-06-24")),
 		)
 
-		from valence.valence.override.whitelisted_method.roster import get_weekly_offs as _get_weekly_offs
-
-		sept_no_off = _get_weekly_offs("2026-09-01", "2026-09-30", {"name": employee})
-		sept_no_off_dates = {row["holiday_date"] for row in sept_no_off.get(employee, [])}
+		initial_events = _holiday_dates(
+			get_events("2026-06-01", "2026-06-30", {"name": employee}, {})
+		)
 		ok(
-			"Roster suppresses Sunday during no-off-day assignment",
-			"2026-09-06" not in sept_no_off_dates and "2026-09-13" not in sept_no_off_dates,
-			str(sorted(sept_no_off_dates)),
+			"Initial roster: contains 17th and 24th as Weekly Off",
+			"2026-06-17" in initial_events and "2026-06-24" in initial_events,
+			str(sorted(initial_events)),
+		)
+		ok(
+			"Initial roster: does NOT have Sunday 7th, 14th, 21th as Weekly Off",
+			"2026-06-07" not in initial_events
+			and "2026-06-14" not in initial_events
+			and "2026-06-21" not in initial_events,
+			str(sorted(initial_events)),
+		)
+
+		# Now change:
+		# 4th to 9th -> 3rd to 9th
+		# 11th to 18th -> 10th to 18th
+		frappe.db.set_value("Shift Assignment", a2, "start_date", "2026-06-03", update_modified=True)
+		frappe.db.set_value("Shift Assignment", a3, "start_date", "2026-06-10", update_modified=True)
+
+		# June 3 is now covered by 3-9 (Wednesday -> Weekly Off!)
+		# June 10 is now covered by 10-18 (Wednesday -> Weekly Off!)
+		ok(
+			"After date change: 3rd resolves to 3-9 assignment",
+			get_applicable_shift_assignment(employee, "2026-06-03") is not None
+			and get_applicable_shift_assignment(employee, "2026-06-03").get("name") == a2,
+			str(get_applicable_shift_assignment(employee, "2026-06-03")),
+		)
+		ok(
+			"After date change: 10th resolves to 10-18 assignment",
+			get_applicable_shift_assignment(employee, "2026-06-10") is not None
+			and get_applicable_shift_assignment(employee, "2026-06-10").get("name") == a3,
+			str(get_applicable_shift_assignment(employee, "2026-06-10")),
+		)
+
+		ok(
+			"After date change: 3rd is now Weekly Off via single lookup",
+			get_day_type(employee, "2026-06-03") == "Weekly Off",
+			str(get_day_type(employee, "2026-06-03")),
+		)
+		ok(
+			"After date change: 10th is now Weekly Off via single lookup",
+			get_day_type(employee, "2026-06-10") == "Weekly Off",
+			str(get_day_type(employee, "2026-06-10")),
+		)
+
+		bulk_map_june = get_day_type_map([employee], "2026-06-01", "2026-06-30")
+		ok(
+			"After date change: bulk map has 3rd as Weekly Off",
+			bulk_map_june.get((employee, getdate("2026-06-03"))) == "Weekly Off",
+			str(bulk_map_june.get((employee, getdate("2026-06-03")))),
+		)
+		ok(
+			"After date change: bulk map has 10th as Weekly Off",
+			bulk_map_june.get((employee, getdate("2026-06-10"))) == "Weekly Off",
+			str(bulk_map_june.get((employee, getdate("2026-06-10")))),
+		)
+
+		# Boundary dates verification:
+		# Start dates: June 1, 3, 10, 20
+		# End dates: June 2, 9, 18
+		ok(
+			"Boundary: start date June 1 resolves to assignment",
+			get_applicable_shift_assignment(employee, "2026-06-01") is not None,
+		)
+		ok(
+			"Boundary: end date June 2 resolves to assignment",
+			get_applicable_shift_assignment(employee, "2026-06-02") is not None,
+		)
+		ok(
+			"Boundary: start date June 3 resolves to assignment",
+			get_applicable_shift_assignment(employee, "2026-06-03") is not None,
+		)
+		ok(
+			"Boundary: end date June 9 resolves to assignment",
+			get_applicable_shift_assignment(employee, "2026-06-09") is not None,
+		)
+		ok(
+			"Boundary: start date June 10 resolves to assignment",
+			get_applicable_shift_assignment(employee, "2026-06-10") is not None,
+		)
+		ok(
+			"Boundary: end date June 18 resolves to assignment",
+			get_applicable_shift_assignment(employee, "2026-06-18") is not None,
+		)
+		ok(
+			"Boundary: start date June 20 resolves to open-ended assignment",
+			get_applicable_shift_assignment(employee, "2026-06-20") is not None,
+		)
+
+		# Adjacent assignments: June 1-2 and June 3-9 are adjacent (no gap between 2 and 3)
+		ok(
+			"Adjacent: June 2 (Tuesday) inside 1-2 is regular working day",
+			get_day_type(employee, "2026-06-02") is None,
+		)
+		ok(
+			"Adjacent: June 3 (Wednesday) inside 3-9 is Weekly Off",
+			get_day_type(employee, "2026-06-03") == "Weekly Off",
+		)
+		ok(
+			"Adjacent: June 9 (Tuesday) inside 3-9 is regular working day",
+			get_day_type(employee, "2026-06-09") is None,
+		)
+		ok(
+			"Adjacent: June 10 (Wednesday) inside 10-18 is Weekly Off",
+			get_day_type(employee, "2026-06-10") == "Weekly Off",
+		)
+
+		# Remaining gap: June 19 is between 10-18 and 20 onwards
+		# June 19 (Friday) is not covered by any assignment -> default holiday list applies (Sunday) -> June 19 is working day
+		ok(
+			"Remaining gap: June 19 resolves to None (working day)",
+			get_day_type(employee, "2026-06-19") is None,
+		)
+		ok(
+			"Remaining gap: June 19 has no applicable assignment",
+			get_applicable_shift_assignment(employee, "2026-06-19") is None,
+		)
+
+		# Roster get_events verification
+		roster_events_june = _holiday_dates(
+			get_events("2026-06-01", "2026-06-30", {"name": employee}, {})
+		)
+		ok(
+			"After date change: Roster now includes June 3 (Wednesday)",
+			"2026-06-03" in roster_events_june,
+			str(sorted(roster_events_june)),
+		)
+		ok(
+			"After date change: Roster now includes June 10 (Wednesday)",
+			"2026-06-10" in roster_events_june,
+			str(sorted(roster_events_june)),
+		)
+		ok(
+			"After date change: Roster includes all Wednesdays: 3rd, 10th, 17th, 24th",
+			{"2026-06-03", "2026-06-10", "2026-06-17", "2026-06-24"}.issubset(roster_events_june),
+			str(sorted(roster_events_june)),
+		)
+		ok(
+			"After date change: Roster does not leak Sundays during assignments",
+			"2026-06-07" not in roster_events_june
+			and "2026-06-14" not in roster_events_june
+			and "2026-06-21" not in roster_events_june
+			and "2026-06-28" not in roster_events_june,
+			str(sorted(roster_events_june)),
 		)
 
 		frappe.db.set_value(

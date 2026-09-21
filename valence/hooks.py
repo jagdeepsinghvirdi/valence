@@ -54,7 +54,8 @@ doctype_js = {"Work Order" : "public/js/work_order.js",
             "Quality Inspection":"public/js/quality_inspection.js",
 			"Shift Schedule":"public/js/shift_schedule.js",
 			"Leave Application":"public/js/leave_application.js",
-			
+			"Shift Assignment":"public/js/shift_assignment.js",
+
 }
 doctype_list_js = {"Batch":"public/js/batch_list.js",
                    "Attendance":"public/js/attendance_list.js",
@@ -337,6 +338,7 @@ override_whitelisted_methods = {
 	"erpnext.controllers.stock_controller.make_quality_inspections": "valence.valence.override.whitelisted_method.stock_controller.make_quality_inspections",
 	"chemical.query.get_batch_no":"valence.valence.override.whitelisted_method.query.get_batch_no",
 	"hrms.api.roster.get_events": "valence.valence.override.whitelisted_method.roster.get_events",
+	"hrms.api.roster.insert_shift": "valence.valence.override.whitelisted_method.roster.insert_shift",
 	# MariaDB 12+: bare to_date is TO_DATE(); backtick column in leave-period lookup
 	"hrms.hr.utils.get_leave_period": "valence.valence.override.leave_application.get_leave_period",
 	"hrms.api.get_leave_types": "valence.valence.doc_events.leave_application.get_leave_types",

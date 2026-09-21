@@ -563,6 +563,7 @@ def _schedule_off_windows(employees):
             Count(ShiftAssignment.end_date).as_("bounded"),
         )
         .where(ShiftAssignment.docstatus == 1)
+        .where(ShiftAssignment.status != "Left")
         .where(ShiftAssignment.employee.isin(employees))
         .where(ShiftAssignment.shift_schedule_assignment.notnull())
         .where(ShiftAssignment.shift_schedule_assignment != "")
@@ -608,7 +609,7 @@ def _off_day_periods(employees, start=None, end=None):
     filters = {
         "employee": ["in", employees],
         "docstatus": 1,
-        "status": ["not in", ["Inactive", "Left"]],
+        "status": ["!=", "Left"],
         "shift_schedule_assignment": ["is", "not set"],
     }
     if end:
@@ -654,6 +655,25 @@ def _covering_assignment_on(periods, date_obj):
         return row
 
     return None
+
+
+def _governing_assignment_exists(employee, date_obj):
+    date_obj = getdate(date_obj)
+
+    return bool(
+        frappe.get_all(
+            "Shift Assignment",
+            filters={
+                "employee": employee,
+                "docstatus": 1,
+                "status": ["!=", "Left"],
+                "start_date": ["<=", date_obj],
+            },
+            or_filters=[["end_date", ">=", date_obj], ["end_date", "is", "not set"]],
+            pluck="name",
+            limit_page_length=1,
+        )
+    )
 
 
 def _off_days_on(periods, date_obj):
@@ -734,6 +754,7 @@ def get_day_type_map(employees, start_date, end_date):
         filters={
             "employee": ["in", employees],
             "docstatus": 1,
+            "status": ["!=", "Left"],
             "start_date": ["<=", end],
         },
         or_filters=[["end_date", ">=", start], ["end_date", "is", "not set"]],
@@ -854,7 +875,7 @@ def get_day_type(employee, attendance_date):
     # When a Shift Assignment governs this date, it is the source of truth
     # for weekly offs — even if its custom_off_day is blank (meaning no off
     # day at all).  The Holiday List weekly off must NOT leak through.
-    if get_applicable_shift_assignment(employee, date_obj):
+    if _governing_assignment_exists(employee, date_obj):
         return None
 
     if holiday_list and holiday and cint(holiday.weekly_off):

@@ -7,8 +7,33 @@ OFF_DAY_FIELD = "custom_off_day"
 def after_migrate():
 	ensure_off_day_field()
 	ensure_shift_assignment_status_options()
+	ensure_optional_shift_type()
 	frappe.clear_cache()
 	frappe.db.commit()
+
+
+def ensure_optional_shift_type():
+	"""Shift Type stays blank for 'Left' assignments; validate() enforces it otherwise."""
+	name = "Shift Assignment-shift_type-reqd"
+
+	if frappe.db.exists("Property Setter", name):
+		if frappe.db.get_value("Property Setter", name, "value") != "0":
+			frappe.db.set_value("Property Setter", name, "value", "0")
+	else:
+		frappe.get_doc(
+			{
+				"doctype": "Property Setter",
+				"name": name,
+				"doc_type": "Shift Assignment",
+				"doctype_or_field": "DocField",
+				"field_name": "shift_type",
+				"property": "reqd",
+				"property_type": "Check",
+				"value": "0",
+				"module": "Valence",
+			}
+		).insert(ignore_permissions=True)
+	frappe.clear_cache(doctype="Shift Assignment")
 
 
 def ensure_shift_assignment_status_options():

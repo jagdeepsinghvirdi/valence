@@ -5,6 +5,41 @@ from hrms.api.roster import get_events as hrms_get_events
 
 
 @frappe.whitelist()
+def insert_shift(
+    employee: str,
+    company: str,
+    shift_type: str,
+    start_date: str,
+    end_date: str | None = None,
+    status: str = "Active",
+    shift_location: str | None = None,
+    custom_off_day: str | None = None,
+):
+    from hrms.api.roster import insert_shift as hrms_insert_shift
+
+    hrms_insert_shift(employee, company, shift_type, start_date, end_date, status, shift_location)
+
+    if not custom_off_day or status == "Left":
+        return
+
+    names = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "shift_type": shift_type,
+            "docstatus": ["!=", 2],
+            "start_date": ["<=", end_date or start_date],
+        },
+        or_filters=[["end_date", ">=", start_date], ["end_date", "is", "not set"]],
+        pluck="name",
+    )
+    for name in names:
+        frappe.db.set_value(
+            "Shift Assignment", name, "custom_off_day", custom_off_day, update_modified=False
+        )
+
+
+@frappe.whitelist()
 def get_events(month_start: str, month_end: str, employee_filters: dict[str, str], shift_filters: dict[str, str]):
     events = hrms_get_events(month_start, month_end, employee_filters, shift_filters)
     day_types = get_day_types(month_start, month_end, employee_filters)

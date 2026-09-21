@@ -1,0 +1,110 @@
+diff --git a/roster/src/components/ShiftAssignmentDialog.vue b/roster/src/components/ShiftAssignmentDialog.vue
+index 1972311..a459e42 100644
+--- a/roster/src/components/ShiftAssignmentDialog.vue
++++ b/roster/src/components/ShiftAssignmentDialog.vue
+@@ -25,7 +25,7 @@
+ 					doctype="Shift Type"
+ 					label="Shift Type"
+ 					v-model="form.shift_type"
+-					:disabled="!!props.shiftAssignmentName"
++					:disabled="!!props.shiftAssignmentName || form.status === 'Left'"
+ 				/>
+ 				<FormControl
+ 					type="date"
+@@ -37,7 +37,7 @@
+ 					doctype="Shift Location"
+ 					label="Shift Location"
+ 					v-model="form.shift_location"
+-					:disabled="!!props.shiftAssignmentName"
++					:disabled="!!props.shiftAssignmentName || form.status === 'Left'"
+ 				/>
+ 				<FormControl
+ 					type="date"
+@@ -47,17 +47,34 @@
+ 				/>
+ 				<FormControl
+ 					type="select"
+-					:options="['Active', 'Inactive']"
++					:options="['Active', 'Inactive', 'Left']"
+ 					label="Status"
+ 					v-model="form.status"
+ 				/>
++				<FormControl
++					type="select"
++					:options="[
++						'',
++						'Sunday',
++						'Monday',
++						'Tuesday',
++						'Wednesday',
++						'Thursday',
++						'Friday',
++						'Saturday',
++					]"
++					label="Weekly Off Day"
++					v-model="form.custom_off_day"
++					:disabled="!!props.shiftAssignmentName || form.status === 'Left'"
++				/>
+ 			</div>
+ 
+ 			<!-- Schedule Settings -->
+ 			<div
+ 				v-if="
+-					(!props.shiftAssignmentName && showShiftScheduleSettings) ||
+-					form.shift_schedule_assignment
++					form.status !== 'Left' &&
++					((!props.shiftAssignmentName && showShiftScheduleSettings) ||
++						form.shift_schedule_assignment)
+ 				"
+ 				class="mt-6 space-y-6"
+ 			>
+@@ -150,7 +167,7 @@ import {
+ import Link from "./Link.vue";
+ import { dayjs, raiseToast } from "../utils";
+ 
+-type Status = "Active" | "Inactive";
++type Status = "Active" | "Inactive" | "Left";
+ 
+ type Form = {
+ 	[K in
+@@ -159,6 +176,7 @@ type Form = {
+ 		| "department"
+ 		| "employee"
+ 		| "shift_type"
++		| "custom_off_day"
+ 		| "shift_location"]: string | { value: string; label?: string };
+ } & {
+ 	start_date: string;
+@@ -194,6 +212,7 @@ const formObject: Form = {
+ 	employee_name: "",
+ 	department: "",
+ 	shift_type: "",
++	custom_off_day: "",
+ 	start_date: "",
+ 	shift_location: "",
+ 	end_date: "",
+@@ -214,6 +233,16 @@ const repeatOnDaysObject = {
+ const form = reactive({ ...formObject });
+ const repeatOnDays = reactive({ ...repeatOnDaysObject });
+ 
++watch(
++	() => form.status,
++	(status) => {
++		if (status !== "Left") return;
++		form.shift_type = "";
++		form.shift_location = "";
++		form.custom_off_day = "";
++	}
++);
++
+ const shiftAssignment = ref();
+ const selectedDate = ref();
+ const frequency = ref("Every Week");
+@@ -451,6 +480,7 @@ const insertShift = createResource({
+ 			status: form.status,
+ 			start_date: form.start_date,
+ 			end_date: form.end_date,
++			custom_off_day: form.custom_off_day,
+ 		};
+ 	},
+ 	onSuccess: () => {

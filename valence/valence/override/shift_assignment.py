@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import getdate, today
+from frappe.utils import add_days, getdate, today
 from hrms.hr.doctype.shift_assignment.shift_assignment import (
 	ShiftAssignment as HRMSShiftAssignment,
 )
@@ -14,6 +14,21 @@ class ShiftAssignment(HRMSShiftAssignment):
 			return
 
 		super().validate_overlapping_shifts()
+
+	def validate(self):
+		self.reset_status_on_amend()
+		super().validate()
+
+	def reset_status_on_amend(self):
+		# Amend copies the cancelled document's Inactive status. Restore Active for a
+		# new amended draft unless its date range has genuinely expired.
+		if not (self.is_new() and self.amended_from):
+			return
+		if self.status != "Inactive":
+			return
+		if self.end_date and getdate(self.end_date) < getdate(add_days(today(), -1)):
+			return
+		self.status = "Active"
 
 	def on_cancel(self):
 		if self.is_past_duplicate_correction():

@@ -5,7 +5,7 @@ from hrms.api.roster import get_events as hrms_get_events
 
 
 @frappe.whitelist()
-def get_events(month_start, month_end, employee_filters, shift_filters):
+def get_events(month_start: str, month_end: str, employee_filters: dict[str, str], shift_filters: dict[str, str]):
     events = hrms_get_events(month_start, month_end, employee_filters, shift_filters)
     day_types = get_day_types(month_start, month_end, employee_filters)
     covered = {employee for employee, _ in day_types}

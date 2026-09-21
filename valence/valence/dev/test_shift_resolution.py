@@ -789,6 +789,66 @@ def run():
 			str(_status_for(DEFAULT_SHIFT, 1, *day_short)),
 		)
 
+		print("")
+		print("-- Amended assignments -------------------------------------------")
+		from datetime import datetime, time as dtime
+		from frappe.utils import add_days, today
+		from hrms.hr.doctype.shift_assignment.shift_assignment import get_employee_shift
+
+		def _new_sa(start, end):
+			doc = frappe.get_doc(
+				{
+					"doctype": "Shift Assignment",
+					"employee": employee,
+					"shift_type": TEMP_SHIFT,
+					"company": _company(),
+					"start_date": start,
+					"end_date": end,
+					"status": "Active",
+					"custom_off_day": "Wednesday",
+				}
+			)
+			doc.insert(ignore_permissions=True)
+			doc.submit()
+			return doc
+
+		def _amend_copy(src):
+			src.cancel()
+			new = frappe.copy_doc(src)
+			new.amended_from = src.name
+			return new
+
+		_cleanup(employee)
+		src = _new_sa(add_days(today(), 30), add_days(today(), 36))
+		amended = _amend_copy(src)
+		amended.insert(ignore_permissions=True)
+		ok("Amended future assignment draft is Active", amended.status == "Active", str(amended.status))
+		amended.submit()
+		res = get_employee_shift(
+			employee,
+			for_timestamp=datetime.combine(getdate(add_days(today(), 33)), dtime(10, 0)),
+		)
+		shift_name = ((res or {}).get("shift_type") or {}).get("name")
+		ok("HRMS sees the amended future assignment", shift_name == TEMP_SHIFT, str(shift_name))
+
+		_cleanup(employee)
+		src = _new_sa("2026-01-05", "2026-01-10")
+		amended = _amend_copy(src)
+		amended.insert(ignore_permissions=True)
+		ok("Amended assignment whose range already ended stays Inactive", amended.status == "Inactive", str(amended.status))
+
+		_cleanup(employee)
+		_new_sa(add_days(today(), 30), add_days(today(), 36))
+		other = _new_sa(add_days(today(), 40), add_days(today(), 46))
+		overlapping = _amend_copy(other)
+		overlapping.start_date = add_days(today(), 34)
+		rejected = False
+		try:
+			overlapping.insert(ignore_permissions=True)
+		except frappe.ValidationError:
+			rejected = True
+		ok("Amended assignment overlapping another one is rejected", rejected)
+
 	finally:
 		_cleanup(employee)
 		frappe.db.commit()

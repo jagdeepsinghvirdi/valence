@@ -30,7 +30,11 @@ class ShiftAssignment(HRMSShiftAssignment):
 			return
 
 		if not self.shift_type:
-			frappe.throw(_("Shift Type is required unless the assignment status is Left."))
+			frappe.throw(
+				_(
+					"Shift Type is required unless the assignment status is Left. To undo Left, cancel this Shift Assignment using the Undo Left button."
+				)
+			)
 
 	def reset_status_on_amend(self):
 		# Amend copies the cancelled document's Inactive status. Restore Active for a
@@ -44,7 +48,7 @@ class ShiftAssignment(HRMSShiftAssignment):
 		self.status = "Active"
 
 	def on_cancel(self):
-		if self.is_past_duplicate_correction():
+		if self.status == "Left" or self.is_past_duplicate_correction():
 			self.db_set("status", "Inactive", update_modified=False)
 			return
 

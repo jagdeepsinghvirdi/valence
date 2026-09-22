@@ -29,6 +29,8 @@ app_license = "mit"
 app_include_js = [
 	"valence.bundle.js"
 ]
+
+page_renderer = ["valence.valence.page_renderer.RosterPageRenderer"]
 # include js, css files in header of web template
 # web_include_css = "/assets/valence/css/valence.css"
 # web_include_js = "/assets/valence/js/valence.js"

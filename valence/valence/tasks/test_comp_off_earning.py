@@ -215,6 +215,9 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		emp = employee or self.employee
 		existing = frappe.db.get_value("Attendance", {"employee": emp, "attendance_date": att_date}, "name")
 		if existing:
+			existing_doc = frappe.get_doc("Attendance", existing)
+			if existing_doc.docstatus == 1:
+				existing_doc.cancel()
 			frappe.delete_doc("Attendance", existing, force=1, ignore_permissions=True)
 
 		doc_dict = {
@@ -605,6 +608,9 @@ class TestCompOffEarningIntegration(FrappeTestCase):
 		d = add_days(nowdate(), -67)
 		existing = frappe.db.get_value("Attendance", {"employee": self.employee, "attendance_date": d}, "name")
 		if existing:
+			existing_doc = frappe.get_doc("Attendance", existing)
+			if existing_doc.docstatus == 1:
+				existing_doc.cancel()
 			frappe.delete_doc("Attendance", existing, force=1, ignore_permissions=True)
 
 		draft_att = frappe.get_doc(

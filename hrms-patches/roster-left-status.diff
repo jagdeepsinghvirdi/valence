@@ -1,8 +1,31 @@
 diff --git a/roster/src/components/ShiftAssignmentDialog.vue b/roster/src/components/ShiftAssignmentDialog.vue
-index 1972311..a459e42 100644
+index 1972311..4097d97 100644
 --- a/roster/src/components/ShiftAssignmentDialog.vue
 +++ b/roster/src/components/ShiftAssignmentDialog.vue
-@@ -25,7 +25,7 @@
+@@ -1,6 +1,22 @@
+ <template>
+ 	<Dialog :options="{ title: dialog.title, size: '4xl' }">
+ 		<template #body-content>
++			<div class="mb-5">
++				<FormControl type="checkbox" label="Employee has left" v-model="hasLeft" />
++			</div>
++			<div
++				v-if="hasLeft"
++				class="mb-5 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
++			>
++				<div v-html="leftConfirmMessage" />
++				<div class="mt-2">
++					<FormControl
++						type="checkbox"
++						label="I understand this cannot be undone"
++						v-model="leftAcknowledged"
++					/>
++				</div>
++			</div>
+ 			<div class="grid grid-cols-2 gap-6">
+ 				<Link
+ 					doctype="Employee"
+@@ -25,7 +41,7 @@
  					doctype="Shift Type"
  					label="Shift Type"
  					v-model="form.shift_type"
@@ -11,7 +34,7 @@ index 1972311..a459e42 100644
  				/>
  				<FormControl
  					type="date"
-@@ -37,7 +37,7 @@
+@@ -37,7 +53,7 @@
  					doctype="Shift Location"
  					label="Shift Location"
  					v-model="form.shift_location"
@@ -20,7 +43,7 @@ index 1972311..a459e42 100644
  				/>
  				<FormControl
  					type="date"
-@@ -47,17 +47,34 @@
+@@ -47,17 +63,35 @@
  				/>
  				<FormControl
  					type="select"
@@ -28,7 +51,8 @@ index 1972311..a459e42 100644
 +					:options="['Active', 'Inactive', 'Left']"
  					label="Status"
  					v-model="form.status"
- 				/>
++					:disabled="hasLeft"
++				/>
 +				<FormControl
 +					type="select"
 +					:options="[
@@ -44,7 +68,7 @@ index 1972311..a459e42 100644
 +					label="Weekly Off Day"
 +					v-model="form.custom_off_day"
 +					:disabled="!!props.shiftAssignmentName || form.status === 'Left'"
-+				/>
+ 				/>
  			</div>
  
  			<!-- Schedule Settings -->
@@ -58,7 +82,7 @@ index 1972311..a459e42 100644
  				"
  				class="mt-6 space-y-6"
  			>
-@@ -150,7 +167,7 @@ import {
+@@ -150,7 +184,7 @@ import {
  import Link from "./Link.vue";
  import { dayjs, raiseToast } from "../utils";
  
@@ -67,7 +91,7 @@ index 1972311..a459e42 100644
  
  type Form = {
  	[K in
-@@ -159,6 +176,7 @@ type Form = {
+@@ -159,6 +193,7 @@ type Form = {
  		| "department"
  		| "employee"
  		| "shift_type"
@@ -75,7 +99,7 @@ index 1972311..a459e42 100644
  		| "shift_location"]: string | { value: string; label?: string };
  } & {
  	start_date: string;
-@@ -194,6 +212,7 @@ const formObject: Form = {
+@@ -194,6 +229,7 @@ const formObject: Form = {
  	employee_name: "",
  	department: "",
  	shift_type: "",
@@ -83,13 +107,23 @@ index 1972311..a459e42 100644
  	start_date: "",
  	shift_location: "",
  	end_date: "",
-@@ -214,6 +233,16 @@ const repeatOnDaysObject = {
+@@ -214,12 +250,38 @@ const repeatOnDaysObject = {
  const form = reactive({ ...formObject });
  const repeatOnDays = reactive({ ...repeatOnDaysObject });
  
++const hasLeft = ref(false);
++const leftAcknowledged = ref(false);
++
++watch(hasLeft, (val) => {
++	form.status = val ? "Left" : "Active";
++	if (val) form.end_date = "";
++	else leftAcknowledged.value = false;
++});
++
 +watch(
 +	() => form.status,
 +	(status) => {
++		hasLeft.value = status === "Left";
 +		if (status !== "Left") return;
 +		form.shift_type = "";
 +		form.shift_location = "";
@@ -100,7 +134,60 @@ index 1972311..a459e42 100644
  const shiftAssignment = ref();
  const selectedDate = ref();
  const frequency = ref("Every Week");
-@@ -451,6 +480,7 @@ const insertShift = createResource({
+ const showDeleteDialog = ref(false);
+ const deleteDialogOptions = ref({ title: "", message: "", action: () => {} });
+ 
++const leftConfirmMessage = computed(() => {
++	const name = form.employee_name || form.employee || "This employee";
++	const from = form.start_date ? ` from <b>${form.start_date}</b>` : "";
++	return `<b>${name}</b> will be marked as <b>Left</b>${from}.<br><br>This cannot be undone from the Roster.`;
++});
++
+ const dialog = computed(() => {
+ 	if (props.shiftAssignmentName)
+ 		return {
+@@ -227,14 +289,15 @@ const dialog = computed(() => {
+ 			button: "Update",
+ 			action: updateShiftAssigment,
+ 			actionDisabled:
+-				form.status === shiftAssignment.value?.doc?.status &&
+-				form.end_date === shiftAssignment.value?.doc?.end_date,
++				(hasLeft.value && !leftAcknowledged.value) ||
++				(form.status === shiftAssignment.value?.doc?.status &&
++					form.end_date === shiftAssignment.value?.doc?.end_date),
+ 		};
+ 	return {
+ 		title: "New Shift Assignment",
+-		button: "Submit",
++		button: hasLeft.value ? "Mark as Left" : "Submit",
+ 		action: createShiftAssigment,
+-		actionDisabled: false,
++		actionDisabled: hasLeft.value && !leftAcknowledged.value,
+ 	};
+ });
+ 
+@@ -300,16 +363,20 @@ watch(
+ 	(val) => {
+ 		if (!val) {
+ 			Object.assign(form, formObject);
++			hasLeft.value = false;
++			leftAcknowledged.value = false;
+ 			return;
+ 		}
+ 
+ 		showDeleteDialog.value = false;
++		leftAcknowledged.value = false;
+ 
+ 		if (props.shiftAssignmentName) {
+ 			shiftAssignment.value = getShiftAssignment(props.shiftAssignmentName);
+ 			if (props.selectedCell) selectedDate.value = props.selectedCell.date;
+ 		} else {
+ 			Object.assign(form, formObject);
++			hasLeft.value = false;
+ 			if (!props.selectedCell) return;
+ 
+ 			form.employee = props.selectedCell.employee;
+@@ -451,6 +518,7 @@ const insertShift = createResource({
  			status: form.status,
  			start_date: form.start_date,
  			end_date: form.end_date,

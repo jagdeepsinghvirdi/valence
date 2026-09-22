@@ -433,6 +433,30 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
 #             frappe.db.commit()
 #         return "Weekly Off"
 
+def _gap_covering_assignment(employee, date_obj):
+    from frappe.utils import add_days
+
+    if not frappe.db.has_column("Shift Assignment", "custom_off_day"):
+        return None
+
+    date_obj = getdate(date_obj)
+
+    rows = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "docstatus": 1,
+            "status": ["!=", "Left"],
+            "start_date": ["<=", add_days(date_obj, 14)],
+        },
+        or_filters=[["end_date", ">=", add_days(date_obj, -14)], ["end_date", "is", "not set"]],
+        fields=["name", "shift_type", "status", "custom_off_day", "start_date", "end_date", "creation"],
+        order_by="start_date desc, creation desc",
+    )
+
+    return _covering_assignment_on(rows, date_obj)
+
+
 def get_applicable_shift_assignment(employee, date_obj):
     """Single source of truth: the Shift Assignment covering employee/date, or None."""
     if not employee or not date_obj:
@@ -453,7 +477,7 @@ def get_applicable_shift_assignment(employee, date_obj):
     )
 
     if not rows:
-        return None
+        return _gap_covering_assignment(employee, date_obj)
 
     # If any covering assignment marks the employee as Left, Left takes precedence
     # over any overlapping Active assignments that were not ended.
@@ -651,6 +675,17 @@ def _covering_assignment_on(periods, date_obj):
         if getdate(row.start_date) > date_obj:
             continue
         if row.end_date and getdate(row.end_date) < date_obj:
+            continue
+        return row
+
+    weekday = date_obj.strftime("%A").lower()
+    for row in periods or []:
+        off_days = _weekly_off_days_from_assignment(row)
+        if weekday not in off_days:
+            continue
+        if _extend_over_off_days(getdate(row.start_date), off_days, -1) > date_obj:
+            continue
+        if row.end_date and _extend_over_off_days(getdate(row.end_date), off_days, 1) < date_obj:
             continue
         return row
 

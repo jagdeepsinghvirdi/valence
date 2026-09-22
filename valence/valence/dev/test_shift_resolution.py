@@ -519,9 +519,9 @@ def run():
 		# Initial state checks
 		# Covered dates: June 1, 2, 4, 5, 6, 7, 8, 9, 11-18, 20-30
 		# Gaps: June 3, June 10, June 19
-		# On June 3 (gap, Wednesday): not covered by assignment -> Default holiday list (Sunday) applies -> June 3 is working day (None)
+		# On June 3 (gap, Wednesday): gap between assignments on the assignment weekly off -> Weekly Off
 		# On June 7 (inside 4-9, Sunday): covered by assignment (WO=Wednesday) -> Sunday is working day (None)
-		# On June 10 (gap, Wednesday): gap -> working day (None)
+		# On June 10 (gap, Wednesday): gap between assignments on the assignment weekly off -> Weekly Off
 		# On June 14 (inside 11-18, Sunday): covered by assignment -> Sunday is working day (None)
 		# On June 17 (inside 11-18, Wednesday): covered by assignment -> Weekly Off
 		# On June 19 (gap, Friday): working day (None)
@@ -529,13 +529,13 @@ def run():
 		# On June 24 (inside 20 onwards, Wednesday): covered by assignment -> Weekly Off
 
 		ok(
-			"Initial sequence: 3rd is a gap day (not WO)",
-			get_day_type(employee, "2026-06-03") is None,
+			"Initial sequence: 3rd is a gap day on the assignment weekly off",
+			get_day_type(employee, "2026-06-03") == "Weekly Off",
 			str(get_day_type(employee, "2026-06-03")),
 		)
 		ok(
-			"Initial sequence: 10th is a gap day (not WO)",
-			get_day_type(employee, "2026-06-10") is None,
+			"Initial sequence: 10th is a gap day on the assignment weekly off",
+			get_day_type(employee, "2026-06-10") == "Weekly Off",
 			str(get_day_type(employee, "2026-06-10")),
 		)
 		ok(

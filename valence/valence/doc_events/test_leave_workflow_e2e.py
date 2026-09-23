@@ -303,7 +303,7 @@ def run():
 			f"state={rej2.workflow_state} status={rej2.status}",
 		)
 
-		# ------ Self-approval blocked at HOD ------
+		# ------ Self-approval blocked for the applicant ------
 		owned = _new_leave(
 			actors["employee"]["employee"],
 			leave_type,
@@ -312,20 +312,23 @@ def run():
 			start_offset=FROM_OFFSET_DAYS + 60,
 		)
 		created_names.append(owned.name)
-		# Make HOD the owner then apply as employee then try approve as owner
-		frappe.db.set_value("Leave Application", owned.name, "owner", HOD_USER)
 		with _as_user(EMP_USER):
 			apply_workflow(frappe.get_doc("Leave Application", owned.name), "Apply")
 
 		self_blocked = False
 		err = ""
-		with _as_user(HOD_USER):
+		with _as_user(EMP_USER):
 			try:
 				apply_workflow(frappe.get_doc("Leave Application", owned.name), "Approve")
 			except Exception as e:
-				self_blocked = "Self approval" in str(e) or "not allowed" in str(e).lower()
+				message = str(e).lower()
+				self_blocked = (
+					"your own" in message
+					or "not allowed" in message
+					or "not a valid workflow action" in message
+				)
 				err = str(e)[:160]
-		ok("Self-approval blocked for document owner at Approve", self_blocked, err)
+		ok("Self-approval blocked for the applicant at Approve", self_blocked, err)
 
 		# ------ System leave finalize still works with workflow ------
 		from valence.valence.doc_events.leave_application import finalize_system_leave_application

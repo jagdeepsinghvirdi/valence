@@ -5,6 +5,8 @@ from frappe.utils import flt,cint, get_url_to_form, nowdate
 from erpnext.accounts.utils import getdate
 from email.utils import formataddr
 from valence.valence.doc_events.attendance import set_status
+
+OVERNIGHT_CHECKOUT_GRACE = timedelta(hours=2)
 # from frappe.utils import get_datetime
 # from datetime import timedelta
 
@@ -88,6 +90,8 @@ def _get_shift_punch_window(shift_name, attendance_date):
 
     check_in_buf = cint(shift_doc.begin_check_in_before_shift_start_time)
     check_out_buf = cint(shift_doc.allow_check_out_after_shift_end_time)
+    if check_in_buf <= 0:
+        check_in_buf = 60
     if check_out_buf <= 0:
         check_out_buf = 60
 
@@ -134,7 +138,12 @@ def get_attendance_punch_window(employee, attendance_date, shift=None):
     if not current:
         return window_start, window_end
 
+    from valence.valence.doc_events.attendance import get_shift_duration_hours
+
     is_overnight = _is_overnight_shift(shift)
+    duration = flt(get_shift_duration_hours(shift))
+    idle_gap = timedelta(hours=max(0.0, (24.0 - duration) / 2))
+    checkout_grace = min(idle_gap, OVERNIGHT_CHECKOUT_GRACE)
 
     previous_date = add_days(date_obj, -1)
     previous = _shift_details_on(get_applicable_shift(employee, previous_date), previous_date)
@@ -144,12 +153,22 @@ def get_attendance_punch_window(employee, attendance_date, shift=None):
             current.actual_start,
         )
         window_start = boundary if is_overnight else max(window_start, boundary)
+    elif is_overnight:
+        window_start = min(window_start, current.start_datetime - idle_gap)
 
     next_date = add_days(date_obj, 1)
     following = _shift_details_on(get_applicable_shift(employee, next_date), next_date)
     if following:
-        boundary = current.end_datetime + (following.start_datetime - current.end_datetime) / 2
-        window_end = max(window_end, min(boundary, following.actual_start))
+        if is_overnight:
+            boundary = min(current.end_datetime + checkout_grace, following.actual_start)
+        else:
+            boundary = min(
+                current.end_datetime + (following.start_datetime - current.end_datetime) / 2,
+                following.actual_start,
+            )
+        window_end = max(window_end, boundary)
+    elif is_overnight:
+        window_end = max(window_end, current.end_datetime + checkout_grace)
 
     return window_start, window_end
 
@@ -454,7 +473,42 @@ def _gap_covering_assignment(employee, date_obj):
         order_by="start_date desc, creation desc",
     )
 
-    return _covering_assignment_on(rows, date_obj)
+    return _covering_assignment_on(rows, date_obj) or _bridging_assignment(employee, date_obj)
+
+
+def _bridging_assignment(employee, date_obj):
+    date_obj = getdate(date_obj)
+
+    previous = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "docstatus": 1,
+            "status": ["!=", "Left"],
+            "start_date": ["<=", date_obj],
+        },
+        fields=["name", "shift_type", "status", "custom_off_day", "start_date", "end_date", "creation"],
+        order_by="start_date desc, creation desc",
+        limit_page_length=1,
+    )
+    if not previous:
+        return None
+
+    upcoming = frappe.get_all(
+        "Shift Assignment",
+        filters={
+            "employee": employee,
+            "docstatus": 1,
+            "status": ["!=", "Left"],
+            "start_date": [">", date_obj],
+        },
+        pluck="name",
+        limit_page_length=1,
+    )
+    if not upcoming:
+        return None
+
+    return previous[0]
 
 
 def get_applicable_shift_assignment(employee, date_obj):

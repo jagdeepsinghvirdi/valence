@@ -11,14 +11,23 @@ def set_applicable_shift(doc, method=None):
 	punch_time = get_datetime(doc.time)
 	punch_date = getdate(punch_time)
 
-	for attendance_date in (punch_date, add_days(punch_date, -1)):
+	candidates = [punch_date, add_days(punch_date, -1)]
+	assigned = False
+	for attendance_date in candidates:
 		shift = get_applicable_shift(doc.employee, attendance_date)
 		if not shift:
 			continue
+		assigned = True
 		window_start, window_end = get_attendance_punch_window(doc.employee, attendance_date, shift)
 		if window_start <= punch_time <= window_end:
 			break
 	else:
+		if assigned:
+			doc.shift = None
+			doc.shift_start = None
+			doc.shift_end = None
+			doc.shift_actual_start = None
+			doc.shift_actual_end = None
 		return
 
 	details = _shift_details_on(shift, getdate(attendance_date))

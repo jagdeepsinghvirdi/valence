@@ -671,8 +671,9 @@ def run():
 			get_day_type(employee, "2026-06-19") is None,
 		)
 		ok(
-			"Remaining gap: June 19 has no applicable assignment",
-			get_applicable_shift_assignment(employee, "2026-06-19") is None,
+			"Remaining gap: June 19 bridges to the previous assignment",
+			bool(get_applicable_shift_assignment(employee, "2026-06-19")),
+			str(get_applicable_shift_assignment(employee, "2026-06-19")),
 		)
 
 		# Roster get_events verification

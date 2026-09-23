@@ -150,6 +150,11 @@ def _apply_hours_status(attendance, hours, shift_name):
 	half_day_threshold = shift.working_hours_threshold_for_half_day or 0
 	absent_threshold = shift.working_hours_threshold_for_absent or 0
 
+	shift_len = get_shift_duration_hours(shift_name)
+	if shift_len:
+		half_day_threshold = min(flt(half_day_threshold), shift_len)
+		absent_threshold = min(flt(absent_threshold), shift_len)
+
 	if hours <= 0 or hours < absent_threshold:
 		attendance.db_set("status", "Absent")
 	elif hours < half_day_threshold:

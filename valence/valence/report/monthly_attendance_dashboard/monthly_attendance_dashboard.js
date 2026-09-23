@@ -98,6 +98,7 @@ frappe.query_reports["Monthly Attendance Dashboard"] = {
 			label: __("Employee Status"),
 			fieldtype: "Select",
 			options: ["", "Active", "Inactive", "Suspended", "Left"],
+			default: "Active",
 		},
 	],
 
@@ -118,6 +119,7 @@ frappe.query_reports["Monthly Attendance Dashboard"] = {
 
 	onload(report) {
 		valence_inject_styles();
+		$(report.page.wrapper).addClass("valence-att-dashboard");
 
 		report._valence_active_row = null;
 		$(report.page.wrapper).on("click", ".dt-cell", function () {
@@ -182,6 +184,14 @@ function valence_inject_styles() {
 		.valence-att-double { background:#fff0e0; color:#9a3412; }
 		.valence-att-on-duty { background:#e0f2f1; color:#00695c; }
 
+		.valence-att-dashboard .page-form {
+			position: relative;
+			z-index: 20;
+		}
+		.valence-att-dashboard .page-form .awesomplete > ul,
+		.valence-att-dashboard .page-form .frappe-control ul.dropdown-menu {
+			z-index: 21;
+		}
 		.report-wrapper .dt-scrollable {
 			max-height: calc(100vh - 220px);
 			overflow-y: auto;

@@ -159,8 +159,12 @@ def _apply_hours_status(attendance, hours, shift_name):
 		attendance.db_set("status", "Absent")
 	elif hours < half_day_threshold:
 		attendance.db_set("status", "Half Day")
-	elif worked_single_half(shift_name, attendance.in_time, attendance.out_time) and not has_approved_short_leave(
-		getattr(attendance, "employee", None), getattr(attendance, "attendance_date", None)
+	elif (
+		(not shift_len or hours < shift_len)
+		and worked_single_half(shift_name, attendance.in_time, attendance.out_time)
+		and not has_approved_short_leave(
+			getattr(attendance, "employee", None), getattr(attendance, "attendance_date", None)
+		)
 	):
 		attendance.db_set("status", "Half Day")
 	else:

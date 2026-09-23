@@ -61,6 +61,7 @@ doctype_js = {"Work Order" : "public/js/work_order.js",
 }
 doctype_list_js = {"Batch":"public/js/batch_list.js",
                    "Attendance":"public/js/attendance_list.js",
+				   "Employee Checkin":"public/js/employee_checkin_list.js",
 				   "Quarterly Working Days":"public/js/quarterly_working_days_list.js",}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

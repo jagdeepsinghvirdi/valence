@@ -307,15 +307,122 @@ def get_attendance_request_status(doc):
 	return request.reason
 
 
+def calculate_punch_pair_duration(checkins) -> float:
+	"""
+	Calculates total working hours from valid chronological IN -> OUT intervals.
+
+	- Breaks between punch pairs are not counted as working time.
+	- Supports multiple IN/OUT pairs across normal and overnight shifts.
+	- Uses actual datetime values to handle midnight crossing seamlessly.
+	- Non-overlapping intervals ensure no interval is double-counted.
+	"""
+	if not checkins:
+		return 0.0
+
+	parsed = []
+	for chk in checkins:
+		if isinstance(chk, dict):
+			raw_time = chk.get("time")
+			raw_type = chk.get("log_type")
+		elif isinstance(chk, (list, tuple)):
+			raw_time = chk[0] if len(chk) > 0 else None
+			raw_type = chk[1] if len(chk) > 1 else None
+		else:
+			raw_time = getattr(chk, "time", None)
+			raw_type = getattr(chk, "log_type", None)
+
+		dt = _parse_attendance_datetime(raw_time)
+		if not dt:
+			continue
+		log_type = str(raw_type).strip().upper() if raw_type else None
+		parsed.append((dt, log_type))
+
+	if not parsed:
+		return 0.0
+
+	# Sort strictly chronologically by timestamp
+	parsed.sort(key=lambda x: x[0])
+
+	intervals = []
+	has_log_types = any(item[1] in ("IN", "OUT") for item in parsed)
+
+	if has_log_types:
+		current_in = None
+		for dt, log_type in parsed:
+			is_in = (log_type == "IN") or (not log_type and current_in is None)
+			is_out = (log_type == "OUT") or (not log_type and current_in is not None)
+
+			if is_in and not (log_type != "IN" and current_in is not None):
+				if current_in is None:
+					current_in = dt
+				else:
+					# Consecutive INs:
+					# If within 30 minutes, treat as duplicate punch and keep the earlier IN.
+					# If separated by > 30 minutes, employee likely missed an OUT for lunch/break;
+					# reset current_in to this new IN to avoid spanning across the unrecorded break.
+					if (dt - current_in).total_seconds() > 1800:
+						current_in = dt
+			elif is_out:
+				if current_in is not None and dt > current_in:
+					intervals.append((current_in, dt))
+					current_in = None
+				elif intervals:
+					# Consecutive OUTs:
+					# If within 30 minutes of the previous interval's checkout,
+					# extend the previous interval to this latest checkout.
+					prev_in, prev_out = intervals[-1]
+					if (dt - prev_out).total_seconds() <= 1800 and dt > prev_in:
+						intervals[-1] = (prev_in, dt)
+	else:
+		# If log_type is not specified, pair alternating punches: (0,1), (2,3), ...
+		for i in range(0, len(parsed) - 1, 2):
+			t_in, t_out = parsed[i][0], parsed[i + 1][0]
+			if t_out > t_in:
+				intervals.append((t_in, t_out))
+
+	total_seconds = sum((out_dt - in_dt).total_seconds() for in_dt, out_dt in intervals if out_dt > in_dt)
+	return round(total_seconds / 3600.0, 1)
+
+
 def _measured_hours(doc):
 	in_time = _parse_attendance_datetime(doc.in_time)
 	out_time = _parse_attendance_datetime(doc.out_time)
-	hours = round((out_time - in_time).total_seconds() / 3600, 1)
 
-	if has_approved_short_leave(doc.employee, doc.attendance_date):
-		gap = get_actual_shift_gap_hours(doc.shift, doc.in_time, doc.out_time)
+	hours = None
+	checkins = getattr(doc, "_checkins", None)
+
+	if checkins is None:
+		employee = getattr(doc, "employee", None)
+		attendance_date = getattr(doc, "attendance_date", None)
+		shift = getattr(doc, "shift", None)
+		if employee and attendance_date and hasattr(frappe, "get_all"):
+			from valence.api import get_attendance_punch_window, get_applicable_shift
+
+			shift = shift or get_applicable_shift(employee, attendance_date)
+			window_start, window_end = get_attendance_punch_window(employee, attendance_date, shift)
+			checkins = frappe.get_all(
+				"Employee Checkin",
+				filters={
+					"employee": employee,
+					"time": ["between", [window_start, window_end]],
+				},
+				fields=["time", "log_type"],
+				order_by="time asc",
+			)
+
+	if checkins:
+		hours = calculate_punch_pair_duration(checkins)
+
+	if hours is None or (hours == 0.0 and in_time and out_time and not checkins):
+		if in_time and out_time:
+			hours = round((out_time - in_time).total_seconds() / 3600, 1)
+		else:
+			hours = 0.0
+
+	if has_approved_short_leave(getattr(doc, "employee", None), getattr(doc, "attendance_date", None)):
+		gap = get_actual_shift_gap_hours(getattr(doc, "shift", None), doc.in_time, doc.out_time)
 		if gap:
-			shift_len = get_shift_duration_hours(doc.shift)
+			shift_len = get_shift_duration_hours(getattr(doc, "shift", None))
 			if shift_len and (hours + gap) > shift_len:
 				gap = max(0.0, shift_len - hours)
 			hours = round(hours + gap, 1)
@@ -337,7 +444,12 @@ def set_status(self, method):
 
 	day_type = get_day_type(self.employee, self.attendance_date)
 
-	if not self.in_time and not self.out_time and self.status in ("Work From Home", "On Duty", "On Leave"):
+	if not self.in_time and not self.out_time and self.status in (
+		"Work From Home",
+		"On Duty",
+		"On Leave",
+		"Half Day",
+	):
 		return
 
 	if not self.in_time and self.out_time:

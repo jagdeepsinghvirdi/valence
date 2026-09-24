@@ -17,6 +17,7 @@ from valence.api import (
 from valence.valence.attendance_code import get_attendance_code
 from valence.valence.doc_events.attendance import (
     _apply_hours_status,
+    calculate_punch_pair_duration,
     get_double_shift_factor,
     get_shift_duration_hours,
     get_shift_midpoint,
@@ -505,72 +506,138 @@ def run():
         f"got {att_norm.status}",
     )
 
-    # 4A. LIVE PUNCH EXTRACTION & MULTIPLE PUNCHES TEST (Earliest / Latest Selection)
-    chk1 = frappe.new_doc("Employee Checkin")
-    chk1.employee = emp_id
-    chk1.time = "2026-09-05 08:50:00"
-    chk1.log_type = "IN"
-    chk1.insert(ignore_permissions=True)
+    # 4A. LIVE MULTIPLE PUNCHES TEST (Test A & Test D)
+    # 09:00 IN, 13:00 OUT, 14:00 IN, 18:00 OUT -> 8.0 hours
+    chk_m1 = frappe.new_doc("Employee Checkin")
+    chk_m1.employee = emp_id
+    chk_m1.time = "2026-09-05 09:00:00"
+    chk_m1.log_type = "IN"
+    chk_m1.insert(ignore_permissions=True)
 
-    chk2 = frappe.new_doc("Employee Checkin")
-    chk2.employee = emp_id
-    chk2.time = "2026-09-05 13:00:00"
-    chk2.log_type = "OUT"
-    chk2.insert(ignore_permissions=True)
+    chk_m2 = frappe.new_doc("Employee Checkin")
+    chk_m2.employee = emp_id
+    chk_m2.time = "2026-09-05 13:00:00"
+    chk_m2.log_type = "OUT"
+    chk_m2.insert(ignore_permissions=True)
 
-    chk3 = frappe.new_doc("Employee Checkin")
-    chk3.employee = emp_id
-    chk3.time = "2026-09-05 17:10:00"
-    chk3.log_type = "OUT"
-    chk3.insert(ignore_permissions=True)
+    chk_m3 = frappe.new_doc("Employee Checkin")
+    chk_m3.employee = emp_id
+    chk_m3.time = "2026-09-05 14:00:00"
+    chk_m3.log_type = "IN"
+    chk_m3.insert(ignore_permissions=True)
 
-    att_punched = frappe.new_doc("Attendance")
-    att_punched.employee = emp_id
-    att_punched.attendance_date = "2026-09-05"
-    att_punched.status = "No punch"
-    att_punched.shift = shift_name
-    att_punched.insert(ignore_permissions=True)
+    chk_m4 = frappe.new_doc("Employee Checkin")
+    chk_m4.employee = emp_id
+    chk_m4.time = "2026-09-05 18:00:00"
+    chk_m4.log_type = "OUT"
+    chk_m4.insert(ignore_permissions=True)
 
-    get_employee_checkin_entries(emp_id, "2026-09-05", att_punched.name)
-    att_punched.reload()
+    att_multi = frappe.new_doc("Attendance")
+    att_multi.employee = emp_id
+    att_multi.attendance_date = "2026-09-05"
+    att_multi.status = "No punch"
+    att_multi.shift = shift_name
+    att_multi.insert(ignore_permissions=True)
+
+    get_employee_checkin_entries(emp_id, "2026-09-05", att_multi.name)
+    att_multi.reload()
 
     ok(
-        "Fetch Time selects EARLIEST punch as in_time (08:50:00)",
-        str(att_punched.in_time) == "2026-09-05 08:50:00",
-        f"got {att_punched.in_time}",
+        "Fetch Time selects EARLIEST punch as in_time (09:00:00)",
+        str(att_multi.in_time) == "2026-09-05 09:00:00",
+        f"got {att_multi.in_time}",
     )
     ok(
-        "Fetch Time selects LATEST punch as out_time (17:10:00)",
-        str(att_punched.out_time) == "2026-09-05 17:10:00",
-        f"got {att_punched.out_time}",
+        "Fetch Time selects LATEST punch as out_time (18:00:00)",
+        str(att_multi.out_time) == "2026-09-05 18:00:00",
+        f"got {att_multi.out_time}",
     )
     ok(
-        "Intermediate punch 13:00:00 is not selected as in_time or out_time",
-        att_punched.in_time != "2026-09-05 13:00:00" and att_punched.out_time != "2026-09-05 13:00:00",
+        "Intermediate punches 13:00 and 14:00 are not selected as in_time or out_time",
+        att_multi.in_time not in ("2026-09-05 13:00:00", "2026-09-05 14:00:00")
+        and att_multi.out_time not in ("2026-09-05 13:00:00", "2026-09-05 14:00:00"),
     )
     ok(
-        "Fetch Time recalculates working_hours end-to-end (8.3h)",
-        att_punched.working_hours == 8.3,
-        f"got {att_punched.working_hours}",
+        "Multiple punches working_hours excludes break (8.0h, not 9.0h)",
+        att_multi.working_hours == 8.0,
+        f"got {att_multi.working_hours}",
     )
     ok(
-        "Fetch Time recalculates status end-to-end to Present",
-        att_punched.status == "Present",
-        f"got {att_punched.status}",
+        "Multiple punches recalculates status to Present",
+        att_multi.status == "Present",
+        f"got {att_multi.status}",
     )
 
-    # 4B. LIVE OVERNIGHT PUNCHES WITH UNRELATED NEXT-DAY PUNCH TEST
-    chk_over_in = frappe.new_doc("Employee Checkin")
-    chk_over_in.employee = emp_id
-    chk_over_in.time = "2026-09-12 21:55:00"  # Before midnight
-    chk_over_in.log_type = "IN"
-    chk_over_in.insert(ignore_permissions=True)
+    # 4B. LIVE NORMAL SINGLE PAIR TEST (Test B & Test D)
+    # 09:00 IN, 17:00 OUT -> 8.0 hours
+    chk_s1 = frappe.new_doc("Employee Checkin")
+    chk_s1.employee = emp_id
+    chk_s1.time = "2026-09-07 09:00:00"
+    chk_s1.log_type = "IN"
+    chk_s1.insert(ignore_permissions=True)
 
-    chk_over_out = frappe.new_doc("Employee Checkin")
-    chk_over_out.employee = emp_id
-    chk_over_out.time = "2026-09-13 06:15:00"  # Legit overnight checkout
-    chk_over_out.log_type = "OUT"
-    chk_over_out.insert(ignore_permissions=True)
+    chk_s2 = frappe.new_doc("Employee Checkin")
+    chk_s2.employee = emp_id
+    chk_s2.time = "2026-09-07 17:00:00"
+    chk_s2.log_type = "OUT"
+    chk_s2.insert(ignore_permissions=True)
+
+    att_single = frappe.new_doc("Attendance")
+    att_single.employee = emp_id
+    att_single.attendance_date = "2026-09-07"
+    att_single.status = "No punch"
+    att_single.shift = shift_name
+    att_single.insert(ignore_permissions=True)
+
+    get_employee_checkin_entries(emp_id, "2026-09-07", att_single.name)
+    att_single.reload()
+
+    ok(
+        "Single pair selects EARLIEST punch as in_time (09:00:00)",
+        str(att_single.in_time) == "2026-09-07 09:00:00",
+        f"got {att_single.in_time}",
+    )
+    ok(
+        "Single pair selects LATEST punch as out_time (17:00:00)",
+        str(att_single.out_time) == "2026-09-07 17:00:00",
+        f"got {att_single.out_time}",
+    )
+    ok(
+        "Normal single pair working_hours is 8.0h",
+        att_single.working_hours == 8.0,
+        f"got {att_single.working_hours}",
+    )
+    ok(
+        "Normal single pair status is Present",
+        att_single.status == "Present",
+        f"got {att_single.status}",
+    )
+
+    # 4C. LIVE OVERNIGHT MULTIPLE PUNCHES TEST (Test C & Test D)
+    # 22:00 IN, 01:00 OUT, 02:00 IN, 06:00 OUT -> 7.0 hours
+    chk_o1 = frappe.new_doc("Employee Checkin")
+    chk_o1.employee = emp_id
+    chk_o1.time = "2026-09-12 22:00:00"  # Before midnight
+    chk_o1.log_type = "IN"
+    chk_o1.insert(ignore_permissions=True)
+
+    chk_o2 = frappe.new_doc("Employee Checkin")
+    chk_o2.employee = emp_id
+    chk_o2.time = "2026-09-13 01:00:00"  # First interval checkout
+    chk_o2.log_type = "OUT"
+    chk_o2.insert(ignore_permissions=True)
+
+    chk_o3 = frappe.new_doc("Employee Checkin")
+    chk_o3.employee = emp_id
+    chk_o3.time = "2026-09-13 02:00:00"  # Second interval checkin
+    chk_o3.log_type = "IN"
+    chk_o3.insert(ignore_permissions=True)
+
+    chk_o4 = frappe.new_doc("Employee Checkin")
+    chk_o4.employee = emp_id
+    chk_o4.time = "2026-09-13 06:00:00"  # Final overnight checkout
+    chk_o4.log_type = "OUT"
+    chk_o4.insert(ignore_permissions=True)
 
     chk_over_unrelated = frappe.new_doc("Employee Checkin")
     chk_over_unrelated.employee = emp_id
@@ -578,46 +645,89 @@ def run():
     chk_over_unrelated.log_type = "IN"
     chk_over_unrelated.insert(ignore_permissions=True)
 
-    att_over_live = frappe.new_doc("Attendance")
-    att_over_live.employee = emp_id
-    att_over_live.attendance_date = "2026-09-12"
-    att_over_live.status = "No punch"
-    att_over_live.shift = overnight_name
-    att_over_live.insert(ignore_permissions=True)
+    att_over_multi = frappe.new_doc("Attendance")
+    att_over_multi.employee = emp_id
+    att_over_multi.attendance_date = "2026-09-12"
+    att_over_multi.status = "No punch"
+    att_over_multi.shift = overnight_name
+    att_over_multi.insert(ignore_permissions=True)
 
-    get_employee_checkin_entries(emp_id, "2026-09-12", att_over_live.name)
-    att_over_live.reload()
+    get_employee_checkin_entries(emp_id, "2026-09-12", att_over_multi.name)
+    att_over_multi.reload()
 
     ok(
-        "Overnight Fetch Time selects in_time before midnight (21:55:00)",
-        str(att_over_live.in_time) == "2026-09-12 21:55:00",
-        f"got {att_over_live.in_time}",
+        "Overnight Fetch Time selects in_time before midnight (22:00:00)",
+        str(att_over_multi.in_time) == "2026-09-12 22:00:00",
+        f"got {att_over_multi.in_time}",
     )
     ok(
-        "Overnight Fetch Time selects legitimate checkout after midnight (06:15:00)",
-        str(att_over_live.out_time) == "2026-09-13 06:15:00",
-        f"got {att_over_live.out_time}",
+        "Overnight Fetch Time selects legitimate latest checkout after midnight (06:00:00)",
+        str(att_over_multi.out_time) == "2026-09-13 06:00:00",
+        f"got {att_over_multi.out_time}",
     )
     ok(
         "Overnight Fetch Time EXCLUDES later unrelated next-day punch (11:00:00)",
-        str(att_over_live.out_time) != "2026-09-13 11:00:00",
-        f"got {att_over_live.out_time}",
+        str(att_over_multi.out_time) != "2026-09-13 11:00:00",
+        f"got {att_over_multi.out_time}",
     )
     ok(
-        "Overnight working_hours correctly bounded (8.3h, not 13h+)",
-        att_over_live.working_hours == 8.3,
-        f"got {att_over_live.working_hours}",
+        "Overnight multiple punches working_hours excludes 01:00-02:00 break (7.0h, not 8.0h)",
+        att_over_multi.working_hours == 7.0,
+        f"got {att_over_multi.working_hours}",
     )
     ok(
         "Overnight attendance status set to Present",
-        att_over_live.status == "Present",
-        f"got {att_over_live.status}",
+        att_over_multi.status == "Present",
+        f"got {att_over_multi.status}",
+    )
+
+    # 4D. PURE LOGIC REGRESSION CHECKS FOR PUNCH PAIR HELPER
+    ok(
+        "Helper: multiple punches duration is 8.0h",
+        calculate_punch_pair_duration([
+            {"time": "2026-09-05 09:00:00", "log_type": "IN"},
+            {"time": "2026-09-05 13:00:00", "log_type": "OUT"},
+            {"time": "2026-09-05 14:00:00", "log_type": "IN"},
+            {"time": "2026-09-05 18:00:00", "log_type": "OUT"},
+        ]) == 8.0,
+    )
+    ok(
+        "Helper: normal single pair duration is 8.0h",
+        calculate_punch_pair_duration([
+            {"time": "2026-09-05 09:00:00", "log_type": "IN"},
+            {"time": "2026-09-05 17:00:00", "log_type": "OUT"},
+        ]) == 8.0,
+    )
+    ok(
+        "Helper: overnight multiple punches duration is 7.0h",
+        calculate_punch_pair_duration([
+            {"time": "2026-09-12 22:00:00", "log_type": "IN"},
+            {"time": "2026-09-13 01:00:00", "log_type": "OUT"},
+            {"time": "2026-09-13 02:00:00", "log_type": "IN"},
+            {"time": "2026-09-13 06:00:00", "log_type": "OUT"},
+        ]) == 7.0,
+    )
+    ok(
+        "Helper: three pairs duration is 8.0h",
+        calculate_punch_pair_duration([
+            {"time": "2026-09-05 09:00:00", "log_type": "IN"},
+            {"time": "2026-09-05 11:00:00", "log_type": "OUT"},
+            {"time": "2026-09-05 11:30:00", "log_type": "IN"},
+            {"time": "2026-09-05 13:30:00", "log_type": "OUT"},
+            {"time": "2026-09-05 14:30:00", "log_type": "IN"},
+            {"time": "2026-09-05 18:30:00", "log_type": "OUT"},
+        ]) == 8.0,
     )
 
     # Clean up attendance docs & checkins
-    for d in (att_leave, att_wfh, att_od, att_norm, att_punched, att_over_live):
+    for d in (att_leave, att_wfh, att_od, att_norm, att_multi, att_single, att_over_multi):
         frappe.db.delete("Attendance", {"name": d.name})
-    for c in (chk1, chk2, chk3, chk_over_in, chk_over_out, chk_over_unrelated):
+    for c in (
+        chk_m1, chk_m2, chk_m3, chk_m4,
+        chk_s1, chk_s2,
+        chk_o1, chk_o2, chk_o3, chk_o4,
+        chk_over_unrelated,
+    ):
         frappe.db.delete("Employee Checkin", {"name": c.name})
 
     # ------------------------------------------------------------------------

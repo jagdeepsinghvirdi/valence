@@ -109,6 +109,7 @@ after_migrate = [
     "valence.valence.monkey_patch.chemical_stock_entry.after_migrate",
     "valence.valence.setup.short_leave_workflow.after_migrate",
     "valence.valence.doc_events.shift_assignment.after_migrate",
+    "valence.valence.doc_events.employee.after_migrate",
 ]
 
 # Uninstallation
@@ -143,15 +144,17 @@ after_migrate = [
 # -----------
 # Permissions evaluated in scripted ways
 
-# #5 Department-wise Leave Access Control
+# #5 Department-wise Leave Access Control + US6 §20 Employee/Roster scope
 permission_query_conditions = {
 	"Leave Application": "valence.valence.override.query.leave_application_query",
 	"Attendance Request": "valence.valence.override.query.attendance_request_query",
+	"Employee": "valence.valence.override.query.employee_query",
 }
 
 has_permission = {
 	"Leave Application": "valence.valence.override.query.leave_application_has_permission",
 	"Attendance Request": "valence.valence.override.query.attendance_request_has_permission",
+	"Employee": "valence.valence.override.query.employee_has_permission",
 }
 
 # DocType Class
@@ -236,6 +239,14 @@ doc_events = {
   },
   "Employee Checkin": {
     "validate": "valence.valence.doc_events.employee_checkin.set_applicable_shift"
+  },
+  # US6 §20 — don't lock HOD/HR to a single Employee via User Permission
+  "Employee": {
+    "on_update": "valence.valence.doc_events.employee.on_update",
+  },
+  "Has Role": {
+    "after_insert": "valence.valence.doc_events.employee.on_user_role_change",
+    "on_trash": "valence.valence.doc_events.employee.on_user_role_change",
   },
   # Track B leave rules (shared file with Track A #8 — coordinate edits)
   "Leave Application": {

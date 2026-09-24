@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from frappe.utils import flt,cint, get_url_to_form, nowdate
 from erpnext.accounts.utils import getdate
 from email.utils import formataddr
-from valence.valence.doc_events.attendance import set_status
+from valence.valence.doc_events.attendance import set_status, calculate_punch_pair_duration
 
 OVERNIGHT_CHECKOUT_GRACE = timedelta(hours=2)
 # from frappe.utils import get_datetime
@@ -217,36 +217,30 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
     shift = get_applicable_shift(employee, attendance_date) or attendance_doc.shift
     start_date, end_date = get_attendance_punch_window(employee, attendance_date, shift)
 
-    # 3. Fetch first and last check-ins
-    in_time_doc = frappe.get_all(
+    # 3. Fetch check-ins within shift punch window
+    checkins = frappe.get_all(
         "Employee Checkin",
         filters={
             "employee": employee,
             "time": ["between", [start_date, end_date]]
         },
-        fields=["time"],
-        order_by="time asc",
-        limit_page_length=1
+        fields=["time", "log_type"],
+        order_by="time asc"
     )
 
-    out_time_doc = frappe.get_all(
-        "Employee Checkin",
-        filters={
-            "employee": employee,
-            "time": ["between", [start_date, end_date]]
-        },
-        fields=["time"],
-        order_by="time desc",
-        limit_page_length=1
-    )
-    # 4. Get the times
-    if in_time_doc == out_time_doc:
-        in_time = in_time_doc[0].time if in_time_doc else None
+    # 4. Get the times: earliest punch -> in_time, latest punch -> out_time
+    if not checkins:
+        in_time = None
+        out_time = None
+    elif len(checkins) == 1:
+        in_time = checkins[0].time
         out_time = None
     else:
-        in_time = in_time_doc[0].time if in_time_doc else None
-        out_time = out_time_doc[0].time if out_time_doc else None
-    
+        in_time = checkins[0].time
+        out_time = checkins[-1].time
+        if in_time == out_time:
+            out_time = None
+
     # 5. Update the values in memory first so set_status can calculate
     attendance_doc.in_time = in_time
     attendance_doc.out_time = out_time
@@ -254,6 +248,8 @@ def get_employee_checkin_entries(employee, attendance_date, doc):
     # 6. Manually update in_time and out_time in DB (since it's submitted)
     attendance_doc.db_set('in_time', in_time)
     attendance_doc.db_set('out_time', out_time)
+
+    attendance_doc._checkins = checkins
 
     # 7. Run your status logic
     # Your set_status already uses db_set for status and working_hours,
@@ -355,36 +351,28 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
     shift = get_applicable_shift(employee, attendance_date) or frappe.db.get_value("Attendance", attendance, "shift")
     start_date, end_date = get_attendance_punch_window(employee, attendance_date, shift)
 
-    # Fetch first check-in
-    in_time_doc = frappe.get_all(
+    # Fetch check-ins within shift punch window
+    checkins = frappe.get_all(
         "Employee Checkin",
         filters={
             "employee": employee,
             "time": ["between", [start_date, end_date]]
         },
-        fields=["time"],
-        order_by="time asc",
-        limit_page_length=1
+        fields=["time", "log_type"],
+        order_by="time asc"
     )
 
-    # Fetch last check-in
-    out_time_doc = frappe.get_all(
-        "Employee Checkin",
-        filters={
-            "employee": employee,
-            "time": ["between", [start_date, end_date]]
-        },
-        fields=["time"],
-        order_by="time desc",
-        limit_page_length=1
-    )
-
-    if in_time_doc == out_time_doc:
-        in_time = in_time_doc[0].time if in_time_doc else None
+    if not checkins:
+        in_time = None
+        out_time = None
+    elif len(checkins) == 1:
+        in_time = checkins[0].time
         out_time = None
     else:
-        in_time = in_time_doc[0].time if in_time_doc else None
-        out_time = out_time_doc[0].time if out_time_doc else None
+        in_time = checkins[0].time
+        out_time = checkins[-1].time
+        if in_time == out_time:
+            out_time = None
 
     # ------------------------------------------------
     # Case 1: At least one punch exists
@@ -398,7 +386,9 @@ def get_employee_checkin_entries_multiple(employee, attendance_date, attendance)
                 "out_time": out_time
             }
         )
-        set_status(frappe.get_doc("Attendance", attendance), "validate")
+        att_doc = frappe.get_doc("Attendance", attendance)
+        att_doc._checkins = checkins
+        set_status(att_doc, "validate")
         return {
             "attendance": attendance,
             "message": f"{attendance}: Check-in entries fetched successfully."

@@ -1,4 +1,5 @@
 import frappe
+from frappe import _
 from frappe.utils import cint, getdate
 
 from hrms.api.roster import get_events as hrms_get_events
@@ -16,6 +17,13 @@ def insert_shift(
     custom_off_day: str | None = None,
 ):
     from hrms.api.roster import insert_shift as hrms_insert_shift
+    from valence.valence.override.query import user_can_access_employee
+
+    if not user_can_access_employee(employee):
+        frappe.throw(
+            _("Not permitted to assign shifts for employee {0}").format(frappe.bold(employee)),
+            frappe.PermissionError,
+        )
 
     hrms_insert_shift(employee, company, shift_type, start_date, end_date, status, shift_location)
 
@@ -41,7 +49,16 @@ def insert_shift(
 
 @frappe.whitelist()
 def get_events(month_start: str, month_end: str, employee_filters: dict[str, str], shift_filters: dict[str, str]):
+    from valence.valence.override.query import get_permitted_employee_names
+
     events = hrms_get_events(month_start, month_end, employee_filters, shift_filters)
+
+    # Defense in depth: Employee get_list already scopes, but filter events too
+    scope = get_permitted_employee_names()
+    if scope is not None:
+        allowed = set(scope)
+        events = {emp: rows for emp, rows in events.items() if emp in allowed}
+
     day_types = get_day_types(month_start, month_end, employee_filters)
     covered = {employee for employee, _ in day_types}
 
@@ -53,6 +70,8 @@ def get_events(month_start: str, month_end: str, employee_filters: dict[str, str
         ]
 
     for employee, off_days in build_weekly_offs(day_types).items():
+        if scope is not None and employee not in scope:
+            continue
         events.setdefault(employee, []).extend(off_days)
 
     apply_left_events(events, month_start, month_end)

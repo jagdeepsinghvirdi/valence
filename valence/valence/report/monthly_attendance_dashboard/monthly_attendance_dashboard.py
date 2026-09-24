@@ -273,7 +273,8 @@ def get_employees(filters, start, end):
 	if filters.get("employee"):
 		conditions["name"] = filters.get("employee")
 	if filters.get("department"):
-		conditions["department"] = filters.get("department")
+		dept_descendants = get_department_descendants(filters.get("department"))
+		conditions["department"] = ["in", dept_descendants]
 	if filters.get("status"):
 		conditions["status"] = filters.get("status")
 

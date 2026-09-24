@@ -14,7 +14,7 @@ const VALENCE_REBUILD_MONTHS = [
 ];
 
 function valence_period_fields() {
-    const today = frappe.datetime.str_to_obj(frappe.datetime.get_today());
+    const today = frappe.datetime.get_today();
 
     return [
         {
@@ -33,26 +33,45 @@ function valence_period_fields() {
         },
         { fieldtype: "Section Break" },
         {
-            fieldname: "month",
-            label: __("Month"),
-            fieldtype: "Select",
-            options: VALENCE_REBUILD_MONTHS.map((m) => ({ value: m.value, label: __(m.label) })),
-            default: today.getMonth() + 1,
+            fieldname: "from_date",
+            label: __("From Date"),
+            fieldtype: "Date",
+            default: frappe.datetime.month_start(),
             reqd: 1,
         },
         {
-            fieldname: "year",
-            label: __("Year"),
-            fieldtype: "Int",
-            default: today.getFullYear(),
+            fieldname: "to_date",
+            label: __("To Date"),
+            fieldtype: "Date",
+            default: today,
             reqd: 1,
+            description: __("Future dates are never processed"),
+        },
+        {
+            fieldname: "set_today",
+            label: __("Set To Date as Today"),
+            fieldtype: "Button",
         },
     ];
+}
+
+function valence_bind_today_button(dialog) {
+    dialog.fields_dict.set_today.$input.on("click", () => {
+        dialog.set_value("to_date", frappe.datetime.get_today());
+    });
 }
 
 function valence_validate_scope(values) {
     if (!values.employee && !values.department) {
         frappe.msgprint(__("Please select an Employee or a Department."));
+        return false;
+    }
+    if (!values.from_date || !values.to_date) {
+        frappe.msgprint(__("Please select a From Date and a To Date."));
+        return false;
+    }
+    if (values.from_date > values.to_date) {
+        frappe.msgprint(__("From Date cannot be after To Date."));
         return false;
     }
     return true;
@@ -94,6 +113,7 @@ function valence_open_rebuild_dialog(on_done) {
         },
     });
 
+    valence_bind_today_button(dialog);
     dialog.show();
 }
 
@@ -125,15 +145,20 @@ function valence_open_fetch_shifts_dialog(on_done) {
         },
     });
 
+    valence_bind_today_button(dialog);
     dialog.show();
 }
 
 function valence_result_title(result) {
+    const period = `${frappe.datetime.str_to_user(result.from_date)} - ${frappe.datetime.str_to_user(
+        result.to_date
+    )}`;
+
     if (result.employee_count === 1 && result.employees && result.employees.length) {
         const only = result.employees[0];
-        return `${only.employee_name || only.employee} - ${result.month}/${result.year}`;
+        return `${only.employee_name || only.employee} (${period})`;
     }
-    return __("{0} employees - {1}/{2}", [result.employee_count, result.month, result.year]);
+    return __("{0} employees ({1})", [result.employee_count, period]);
 }
 
 function valence_show_rebuild_result(result) {

@@ -1,5 +1,3 @@
-import calendar
-
 import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, get_datetime, getdate, nowdate
@@ -8,18 +6,15 @@ PROTECTED_STATUSES = ("On Leave", "Work From Home", "On Duty", "Present With Sho
 
 
 @frappe.whitelist()
-def rebuild_month(month, year, employee=None, department=None, missing_only=1):
-	month = cint(month)
-	year = cint(year)
+def rebuild_month(from_date, to_date, employee=None, department=None, missing_only=1):
 	missing_only = cint(missing_only)
 
-	validate_period(month, year)
+	start, end = validate_period(from_date, to_date)
 
 	if not frappe.has_permission("Attendance", "write"):
 		frappe.throw(_("You are not permitted to rebuild Attendance."))
 
 	employees = resolve_employees(employee, department)
-	start, end = month_range(month, year)
 
 	summaries = []
 	totals = {"created": 0, "updated": 0, "skipped": 0}
@@ -32,8 +27,8 @@ def rebuild_month(month, year, employee=None, department=None, missing_only=1):
 		frappe.db.commit()
 
 	return {
-		"month": month,
-		"year": year,
+		"from_date": str(start),
+		"to_date": str(end),
 		"missing_only": missing_only,
 		"employee_count": len(employees),
 		"created": totals["created"],
@@ -91,16 +86,22 @@ def rebuild_employee_month(employee_doc, start, end, missing_only):
 	}
 
 
-def validate_period(month, year):
-	if not (1 <= month <= 12):
-		frappe.throw(_("Please select a valid Month."))
-	if not year:
-		frappe.throw(_("Please select a valid Year."))
+def validate_period(from_date, to_date):
+	if not from_date or not to_date:
+		frappe.throw(_("Please select a From Date and a To Date."))
 
+	start = getdate(from_date)
+	end = getdate(to_date)
 
-def month_range(month, year):
-	start = getdate(f"{year}-{month:02d}-01")
-	end = getdate(f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}")
+	if start > end:
+		frappe.throw(_("From Date cannot be after To Date."))
+
+	today = getdate(nowdate())
+	if end > today:
+		end = today
+	if start > today:
+		frappe.throw(_("From Date cannot be in the future."))
+
 	return start, end
 
 
@@ -146,6 +147,9 @@ def rebuild_date(employee_doc, date_obj):
 	from valence.api import get_applicable_shift, get_day_type
 
 	date_str = str(date_obj)
+
+	if date_obj > getdate(nowdate()):
+		return result_row(date_str, "skipped", None, _("Future date"))
 
 	if not within_employment(employee_doc, date_obj):
 		return result_row(date_str, "skipped", None, _("Outside employment period"))
@@ -234,8 +238,6 @@ def resolve_status(employee, date_obj, shift, day_type, in_time, out_time):
 	if not in_time and not out_time:
 		if day_type:
 			return day_type, 0.0
-		if date_obj >= getdate(nowdate()):
-			return "No punch", 0.0
 		return "Absent", 0.0
 
 	if day_type:
@@ -341,19 +343,15 @@ def result_row(date_str, action, status, note, attendance=None):
 
 
 @frappe.whitelist()
-def fetch_month_shifts(month, year, employee=None, department=None):
+def fetch_month_shifts(from_date, to_date, employee=None, department=None):
 	from hrms.hr.doctype.employee_checkin.employee_checkin import bulk_fetch_shift
 
-	month = cint(month)
-	year = cint(year)
-
-	validate_period(month, year)
+	start, end = validate_period(from_date, to_date)
 
 	if not frappe.has_permission("Employee Checkin", "write"):
 		frappe.throw(_("You are not permitted to update Employee Checkins."))
 
 	employees = resolve_employees(employee, department)
-	start, end = month_range(month, year)
 	window_start = add_days(start, -1)
 	window_end = add_days(end, 2)
 
@@ -397,8 +395,8 @@ def fetch_month_shifts(month, year, employee=None, department=None):
 			totals[key] += summary[key]
 
 	return {
-		"month": month,
-		"year": year,
+		"from_date": str(start),
+		"to_date": str(end),
 		"employee_count": len(employees),
 		"checkins": totals["checkins"],
 		"matched": totals["matched"],

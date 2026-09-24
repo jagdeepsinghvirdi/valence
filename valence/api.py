@@ -145,7 +145,16 @@ def get_attendance_punch_window(employee, attendance_date, shift=None, expand_of
             )
             floor = max(floor, previous_end)
 
-        return max(floor, min(window_start, day_start)), max(window_end, day_end)
+        ceiling = day_end
+        next_date = add_days(date_obj, 1)
+        next_shift = get_applicable_shift(employee, next_date)
+        if next_shift:
+            next_start, _ = get_attendance_punch_window(
+                employee, next_date, next_shift, expand_offday=False
+            )
+            ceiling = min(ceiling, next_start)
+
+        return max(floor, min(window_start, day_start)), min(max(window_end, day_end), ceiling)
 
     if not shift:
         return window_start, window_end

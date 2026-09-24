@@ -2,7 +2,7 @@ import calendar
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate
+from frappe.utils import cint, flt, getdate, nowdate
 
 from valence.api import get_day_type_map
 from valence.valence.attendance_code import get_attendance_code
@@ -111,7 +111,7 @@ def execute(filters=None):
 			date_obj = getdate(f"{start.year}-{start.month:02d}-{day:02d}")
 			fieldname = f"d{day}"
 
-			if not within_employment(employee, date_obj):
+			if not within_employment(employee, date_obj) or date_obj > getdate(nowdate()):
 				row[fieldname] = ""
 				continue
 

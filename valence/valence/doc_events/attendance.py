@@ -444,7 +444,12 @@ def set_status(self, method):
 
 	day_type = get_day_type(self.employee, self.attendance_date)
 
-	if not self.in_time and not self.out_time and self.status in ("Work From Home", "On Duty", "On Leave"):
+	if not self.in_time and not self.out_time and self.status in (
+		"Work From Home",
+		"On Duty",
+		"On Leave",
+		"Half Day",
+	):
 		return
 
 	if not self.in_time and self.out_time:

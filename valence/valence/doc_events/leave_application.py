@@ -538,3 +538,144 @@ def _users_with_roles(roles: list[str]) -> list[str]:
 def _is_hr_user():
 	roles = set(frappe.get_roles())
 	return bool(roles.intersection({"HR Manager", "HR User", "System Manager"}))
+
+
+def _applicant_user(employee: str | None) -> str | None:
+	if not employee:
+		return None
+	return frappe.db.get_value("Employee", employee, "user_id")
+
+
+def _was_approved_via_super_hod(doc) -> bool:
+	"""True when this leave required / went through the Super HOD stage.
+
+	Uses working-days threshold (same rule as workflow routing). Long leave
+	Approved after Super HOD must not be reopened by the employee.
+	"""
+	from valence.valence.setup.leave_workflow import get_super_hod_working_days_threshold
+
+	working = flt(doc.get(WORKING_LEAVE_DAYS_FIELD) or 0)
+	return working >= float(get_super_hod_working_days_threshold())
+
+
+def employee_may_reopen_leave_for_edit(doc, user: str | None = None) -> bool:
+	"""
+	Employee may reopen leave for edit when:
+	- Applied and waiting at Pending HOD, OR
+	- HOD has approved and leave is at Pending Super HOD, OR
+	- Leave is Approved via HOD-only path (never needed Super HOD)
+
+	Not allowed after Super HOD approval (long leave Approved).
+	Existing HOD/HR/Super HOD edit rules are unchanged — this only gates
+	the employee reopen path.
+	"""
+	user = user or frappe.session.user
+	if not user or user in ("Guest",):
+		return False
+
+	applicant = _applicant_user(doc.get("employee"))
+	if not applicant or applicant != user:
+		return False
+
+	state = doc.get("workflow_state") or DRAFT_STATE
+
+	from valence.valence.setup.leave_workflow import STATE_PENDING_HOD
+
+	if state in (STATE_PENDING_HOD, SUPER_HOD_STATE) and cint(doc.docstatus) == 0:
+		return True
+
+	if state == "Approved" and cint(doc.docstatus) == 1:
+		return not _was_approved_via_super_hod(doc)
+
+	return False
+
+
+@frappe.whitelist()
+def can_employee_reopen_leave_for_edit(name: str) -> bool:
+	"""Desk: show Edit Leave button for the applicant when allowed."""
+	if not name or not frappe.db.exists("Leave Application", name):
+		return False
+	doc = frappe.get_doc("Leave Application", name)
+	return employee_may_reopen_leave_for_edit(doc)
+
+
+@frappe.whitelist()
+def employee_reopen_leave_for_edit(name: str) -> dict:
+	"""
+	Applicant reopens leave for changes → Draft (then Apply again → Pending HOD).
+
+	- Pending Super HOD: reset workflow to Draft on same document
+	- Approved (HOD-only): Cancel + Amend → new Draft
+	- Approved (via Super HOD): blocked
+	"""
+	if not name or not frappe.db.exists("Leave Application", name):
+		frappe.throw(_("Leave Application {0} not found").format(frappe.bold(name)))
+
+	doc = frappe.get_doc("Leave Application", name)
+	if not employee_may_reopen_leave_for_edit(doc):
+		frappe.throw(
+			_(
+				"You can only edit this leave after HOD approval if Super HOD "
+				"has not approved it yet. After Super HOD approval, editing is not allowed."
+			),
+			frappe.PermissionError,
+		)
+
+	state = doc.get("workflow_state") or DRAFT_STATE
+
+	from valence.valence.setup.leave_workflow import STATE_PENDING_HOD
+
+	# Applied / waiting on HOD, or waiting on Super HOD — reopen same document to Draft
+	if state in (STATE_PENDING_HOD, SUPER_HOD_STATE) and cint(doc.docstatus) == 0:
+		# Bypass workflow allow_edit — applicant authorized above
+		frappe.db.set_value(
+			"Leave Application",
+			doc.name,
+			{"workflow_state": DRAFT_STATE, "status": "Open"},
+			update_modified=True,
+		)
+		doc.reload()
+		frappe.msgprint(
+			_("Leave reopened as Draft. Update details and Apply again for HOD approval."),
+			indicator="blue",
+		)
+		return {"name": doc.name, "workflow_state": doc.workflow_state, "amended": 0}
+
+	# HOD-only Approved — Cancel + Amend → Draft (ledger/attendance reverse on cancel)
+	if state == "Approved" and cint(doc.docstatus) == 1:
+		old_name = doc.name
+		# Applicant normally has no Cancel DocPerm — reopen is an explicit product path
+		doc.flags.ignore_permissions = True
+		frappe.flags.ignore_permissions = True
+		try:
+			doc.cancel()
+		finally:
+			frappe.flags.ignore_permissions = False
+
+		amended = frappe.copy_doc(doc)
+		amended.amended_from = old_name
+		amended.docstatus = 0
+		amended.workflow_state = DRAFT_STATE
+		amended.status = "Open"
+		if hasattr(amended, "name"):
+			amended.name = None
+		frappe.flags.ignore_leave_creation_window = True
+		frappe.flags.ignore_present_day_leave_restriction = True
+		frappe.flags.ignore_permissions = True
+		try:
+			amended.insert(ignore_permissions=True)
+		finally:
+			frappe.flags.ignore_leave_creation_window = False
+			frappe.flags.ignore_present_day_leave_restriction = False
+			frappe.flags.ignore_permissions = False
+
+		frappe.msgprint(
+			_(
+				"Leave cancelled and reopened as Draft ({0}). "
+				"Update details and Apply again for HOD approval."
+			).format(frappe.bold(amended.name)),
+			indicator="blue",
+		)
+		return {"name": amended.name, "workflow_state": amended.workflow_state, "amended": 1}
+
+	frappe.throw(_("This leave cannot be reopened for edit in its current state."))

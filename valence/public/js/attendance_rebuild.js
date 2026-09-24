@@ -232,6 +232,49 @@ function valence_show_fetch_shifts_result(result) {
     });
 }
 
+const VALENCE_LIST_BUTTONS = {
+    "Employee Checkin": {
+        label: "Fetch Shifts for Month",
+        open: () => valence_open_fetch_shifts_dialog(() => cur_list && cur_list.refresh()),
+    },
+    Attendance: {
+        label: "Fetch Month Check-ins",
+        open: () => valence_open_rebuild_dialog(() => cur_list && cur_list.refresh()),
+    },
+};
+
+function valence_mount_list_button() {
+    const route = frappe.get_route ? frappe.get_route() : null;
+    if (!route || route[0] !== "List") {
+        return;
+    }
+
+    const config = VALENCE_LIST_BUTTONS[route[1]];
+    if (!config || !window.cur_list || cur_list.doctype !== route[1] || !cur_list.page) {
+        return;
+    }
+
+    const label = __(config.label);
+    const toolbar = cur_list.page.inner_toolbar;
+    if (toolbar && toolbar.find("button").filter((_, el) => $(el).text().trim() === label).length) {
+        return;
+    }
+
+    cur_list.page.add_inner_button(label, config.open);
+}
+
+function valence_watch_list_routes() {
+    const mount = () => setTimeout(valence_mount_list_button, 400);
+
+    if (frappe.router && frappe.router.on) {
+        frappe.router.on("change", mount);
+    }
+    $(document).on("list_view_loaded", mount);
+    mount();
+}
+
+$(document).ready(valence_watch_list_routes);
+
 window.valence_open_rebuild_dialog = valence_open_rebuild_dialog;
 window.valence_open_fetch_shifts_dialog = valence_open_fetch_shifts_dialog;
 window.valence_show_rebuild_result = valence_show_rebuild_result;

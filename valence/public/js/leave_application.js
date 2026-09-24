@@ -2,6 +2,53 @@ frappe.ui.form.on("Leave Application", {
 	refresh(frm) {
 		frm.trigger("restrict_leave_types_for_resign");
 		frm.trigger("show_direct_apply_action");
+		frm.trigger("show_employee_edit_leave");
+	},
+
+	show_employee_edit_leave(frm) {
+		if (frm.is_new() || !frm.doc.name) {
+			return;
+		}
+
+		frappe.call({
+			method: "valence.valence.doc_events.leave_application.can_employee_reopen_leave_for_edit",
+			args: { name: frm.doc.name },
+			error: () => {},
+			callback(r) {
+				if (!r.message) {
+					return;
+				}
+				frm.add_custom_button(__("Edit Leave"), () => {
+					frappe.confirm(
+						__(
+							"This will reopen the leave as Draft. After changes, you must Apply again for HOD approval. Continue?"
+						),
+						() => {
+							frappe.dom.freeze(__("Reopening leave…"));
+							frappe
+								.call({
+									method:
+										"valence.valence.doc_events.leave_application.employee_reopen_leave_for_edit",
+									args: { name: frm.doc.name },
+								})
+								.then((res) => {
+									const name = res.message && res.message.name;
+									if (!name) {
+										frm.reload_doc();
+										return;
+									}
+									if (name === frm.doc.name) {
+										frm.reload_doc();
+									} else {
+										frappe.set_route("Form", "Leave Application", name);
+									}
+								})
+								.finally(() => frappe.dom.unfreeze());
+						}
+					);
+				});
+			},
+		});
 	},
 
 	show_direct_apply_action(frm) {

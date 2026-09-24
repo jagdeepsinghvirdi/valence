@@ -27,8 +27,9 @@ redis-cli -p 11000 ping >/dev/null 2>&1 || redis-server config/redis_queue.conf 
 
 if lsof -nP -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Already listening on :8000"
-  echo "  Demo:   http://demovalence.localhost:8000"
-  echo "  Madhav: http://madhav.localhost:8000"
+  echo "  Demo:      http://demovalence.localhost:8000"
+  echo "  Madhav:    http://madhav.localhost:8000"
+  echo "  Fallback:  http://127.0.0.1:8000"
   exit 0
 fi
 
@@ -44,14 +45,42 @@ if not cfg.get("dns_multitenant"):
     print("Enabled dns_multitenant in common_site_config.json")
 PY
 
+DEFAULT_SITE=$(python3 -c "import json; print(json.load(open('sites/common_site_config.json')).get('default_site') or 'demovalence.localhost')")
+
 echo "Starting multi-site server on :8000 (Ctrl+C to stop)..."
-echo "  Demo:   http://demovalence.localhost:8000"
-echo "  Madhav: http://madhav.localhost:8000"
-echo "  (Use site hostname — plain 127.0.0.1 will not pick a site.)"
+echo "  Demo:      http://demovalence.localhost:8000"
+echo "  Madhav:    http://madhav.localhost:8000"
+echo "  Fallback:  http://127.0.0.1:8000  →  ${DEFAULT_SITE}"
+echo "  If Safari says Can't Find the Server, add hosts:"
+echo "    sudo sh -c 'printf \"\\n127.0.0.1 demovalence.localhost madhav.localhost valence.localhost\\n\" >> /etc/hosts'"
 # site=None so HTTP Host selects demovalence.localhost / madhav.localhost / etc.
+# 127.0.0.1 / localhost fall back to default_site (Safari often cannot resolve *.localhost).
 # --noreload avoids the dev reloader dying with “apps.txt Not Found” after file changes
 cd sites
 exec ../env/bin/python -c "
-from frappe.app import serve
-serve(port=8000, no_reload=True, site=None, sites_path='.')
+import functools
+import json
+from pathlib import Path
+
+import frappe.app
+import frappe.utils
+
+cfg = json.loads(Path('common_site_config.json').read_text())
+default_site = cfg.get('default_site') or 'demovalence.localhost'
+fallback_hosts = {
+    '127.0.0.1', 'localhost', '0.0.0.0',
+    '::1', '[::1]',
+}
+
+def get_site_name(hostname):
+    name = (hostname or '').split(':', 1)[0].strip().lower()
+    if name in fallback_hosts or name.startswith('192.168.') or name.startswith('10.'):
+        return default_site
+    return name
+
+# Replace cached helper used by frappe.app.init_request
+frappe.utils.get_site_name = get_site_name
+frappe.app.get_site_name = get_site_name
+
+frappe.app.serve(port=8000, no_reload=True, site=None, sites_path='.')
 "

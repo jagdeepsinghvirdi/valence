@@ -35,6 +35,7 @@ const VALENCE_CODE_CLASS = {
 	"2P": "valence-att-double",
 	"2P/A": "valence-att-double",
 	TT: "valence-att-on-duty",
+	NS: "valence-att-no-shift",
 };
 
 function valence_current_month() {
@@ -183,6 +184,7 @@ function valence_inject_styles() {
 		.valence-att-holiday-worked { background:#ede0fb; color:#4a148c; }
 		.valence-att-double { background:#fff0e0; color:#9a3412; }
 		.valence-att-on-duty { background:#e0f2f1; color:#00695c; }
+		.valence-att-no-shift { background:#f5f5f5; color:#9e9e9e; }
 
 		.valence-att-dashboard .page-form {
 			position: relative;

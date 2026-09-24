@@ -59,6 +59,8 @@ frappe.listview_settings["Attendance"] = {
                 listview.refresh();
             });
         });
+
+        valence_add_rebuild_month_button(listview);
     },
 
     refresh(listview) {
@@ -66,3 +68,14 @@ frappe.listview_settings["Attendance"] = {
         listview.page.actions.find(a => a.label === 'Fetch Time')?.toggle(has_selection);
     }
 };
+
+function valence_add_rebuild_month_button(listview) {
+    if (listview._valence_rebuild_added) {
+        return;
+    }
+    listview._valence_rebuild_added = true;
+
+    listview.page.add_inner_button(__("Fetch Month Check-ins"), () => {
+        window.valence_open_rebuild_dialog(() => listview.refresh());
+    });
+}

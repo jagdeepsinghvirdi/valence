@@ -9,8 +9,20 @@ frappe.listview_settings["Employee Checkin"] = frappe.listview_settings["Employe
             existing_onload(listview);
         }
         valence_add_fetch_shifts_action(listview);
+        valence_add_checkin_rebuild_button(listview);
     };
 })();
+
+function valence_add_checkin_rebuild_button(listview) {
+    if (listview._valence_rebuild_added) {
+        return;
+    }
+    listview._valence_rebuild_added = true;
+
+    listview.page.add_inner_button(__("Fetch Shifts for Month"), () => {
+        window.valence_open_fetch_shifts_dialog(() => listview.refresh());
+    });
+}
 
 function valence_add_fetch_shifts_action(listview) {
     if (listview._valence_fetch_shifts_added) {

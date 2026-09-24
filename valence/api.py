@@ -125,12 +125,28 @@ def _shift_details_on(shift_name, date_obj):
     return get_shift_details(shift_name, datetime.combine(date_obj, datetime.min.time()) + start)
 
 
-def get_attendance_punch_window(employee, attendance_date, shift=None):
+def get_attendance_punch_window(employee, attendance_date, shift=None, expand_offday=True):
     from frappe.utils import add_days
 
     date_obj = getdate(attendance_date)
     shift = shift or get_applicable_shift(employee, date_obj)
     window_start, window_end = _get_shift_punch_window(shift, date_obj)
+
+    if expand_offday and get_day_type(employee, date_obj):
+        day_start = datetime.combine(date_obj, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
+        floor = day_start
+
+        previous_date = add_days(date_obj, -1)
+        previous_shift = get_applicable_shift(employee, previous_date)
+        if previous_shift:
+            _, previous_end = get_attendance_punch_window(
+                employee, previous_date, previous_shift, expand_offday=False
+            )
+            floor = max(floor, previous_end)
+
+        return max(floor, min(window_start, day_start)), max(window_end, day_end)
+
     if not shift:
         return window_start, window_end
 

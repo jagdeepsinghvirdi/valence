@@ -25,6 +25,7 @@ from valence.valence.override.query import (
 ABSENT_CODE = "A"
 WEEKLY_OFF_CODE = "WO"
 HOLIDAY_CODE = "H"
+NO_SHIFT_CODE = "NS"
 
 NON_REPORTABLE_CODES = {
 	"No punch": ABSENT_CODE,
@@ -95,6 +96,7 @@ def execute(filters=None):
 
 	day_types = get_day_type_map(employee_names, start, end)
 	attendance_map = get_attendance_map(employee_names, start, end)
+	shift_coverage = get_shift_coverage(employees, start, end)
 	shift_cache = build_shift_cache(attendance_map)
 	request_reasons = get_request_reasons(attendance_map)
 	remarks = get_remarks(employee_names, filters)
@@ -118,6 +120,9 @@ def execute(filters=None):
 			code = resolve_code(
 				record, day_type, shift_cache, request_reasons, full_day_hours
 			)
+
+			if not code and not record and not has_shift_on(shift_coverage, employee.name, date_obj):
+				code = NO_SHIFT_CODE
 
 			row[fieldname] = code
 			row[f"{fieldname}_status"] = record.get("status") if record else None
@@ -146,6 +151,7 @@ def get_attendance_code_legend():
 		"A": _("Absent"),
 		MISPUNCH_CODE: _("Mispunch"),
 		ON_DUTY_CODE: _("On Duty"),
+		NO_SHIFT_CODE: _("No Shift Assigned"),
 		"2P": _("Double Present"),
 		"2P/A": _("Double Shift Half Day"),
 		"WO": _("Weekly Off"),
@@ -174,7 +180,7 @@ def get_attendance_code_legend():
 	for value in LEAVE_CODES.values():
 		if value not in codes:
 			codes.append(value)
-	for value in (ABSENT_CODE, MISPUNCH_CODE, ON_DUTY_CODE):
+	for value in (ABSENT_CODE, MISPUNCH_CODE, ON_DUTY_CODE, NO_SHIFT_CODE):
 		if value not in codes:
 			codes.append(value)
 
@@ -298,6 +304,7 @@ def get_employees(filters, start, end):
 			"relieving_date",
 			"status",
 			"company",
+			"default_shift",
 		],
 		order_by="employee_name asc",
 		limit_page_length=0,
@@ -504,6 +511,53 @@ def get_attendance_map(employees, start, end):
 	)
 
 	return {(row.employee, getdate(row.attendance_date)): row for row in rows}
+
+
+def get_shift_coverage(employees, start, end):
+	employee_names = [row.name for row in employees]
+	coverage = {
+		row.name: {"default_shift": row.get("default_shift"), "periods": []} for row in employees
+	}
+
+	if not employee_names:
+		return coverage
+
+	assignments = frappe.get_all(
+		"Shift Assignment",
+		filters={
+			"employee": ["in", employee_names],
+			"docstatus": 1,
+			"status": ["!=", "Left"],
+			"start_date": ["<=", getdate(end)],
+		},
+		or_filters=[["end_date", ">=", getdate(start)], ["end_date", "is", "not set"]],
+		fields=["employee", "start_date", "end_date"],
+		limit_page_length=0,
+	)
+
+	for row in assignments:
+		if row.employee in coverage:
+			coverage[row.employee]["periods"].append((getdate(row.start_date), getdate(row.end_date) if row.end_date else None))
+
+	return coverage
+
+
+def has_shift_on(coverage, employee, date_obj):
+	entry = coverage.get(employee)
+	if not entry:
+		return False
+
+	if entry.get("default_shift"):
+		return True
+
+	for period_start, period_end in entry["periods"]:
+		if period_start > date_obj:
+			continue
+		if period_end and period_end < date_obj:
+			continue
+		return True
+
+	return False
 
 
 def build_shift_cache(attendance_map):

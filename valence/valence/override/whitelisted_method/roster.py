@@ -79,6 +79,29 @@ def get_events(month_start: str, month_end: str, employee_filters: dict[str, str
     return events
 
 
+SHIFT_ASSIGNMENT_STATUSES = {"Active", "Inactive", "Left"}
+
+
+def _is_shift_assignment_event(event: dict) -> bool:
+    """Identify Shift Assignment events returned by HRMS get_shifts()."""
+    return (
+        isinstance(event, dict)
+        and "start_date" in event
+        and event.get("status") in SHIFT_ASSIGNMENT_STATUSES
+    )
+
+
+def _is_malformed_shift_assignment(event: dict) -> bool:
+    """
+    Check if event is a Shift Assignment event that should be excluded from roster:
+    - status is 'Left' (handled separately via synthetic Left cells), or
+    - shift_type is missing or empty (regardless of status: Left, Active, Inactive).
+    """
+    if _is_shift_assignment_event(event):
+        return event.get("status") == "Left" or not event.get("shift_type")
+    return False
+
+
 def apply_left_events(events, month_start, month_end):
     """
     Roster cells for employees with status 'Left' in Shift Assignment
@@ -87,10 +110,11 @@ def apply_left_events(events, month_start, month_end):
     if not events:
         return
 
-    # Filter Shift Assignment events with status 'Left' from the roster event lists
-    # before processing synthetic Left cells, while preserving all employee keys.
+    # Filter malformed Shift Assignment events (status 'Left' or missing/empty shift_type)
+    # from the roster event lists before processing synthetic Left cells,
+    # while preserving all employee keys and legitimate non-shift events (holidays, leaves, weekly offs).
     for emp in events:
-        events[emp] = [ev for ev in events[emp] if ev.get("status") != "Left"]
+        events[emp] = [ev for ev in events[emp] if not _is_malformed_shift_assignment(ev)]
 
     from datetime import timedelta
 

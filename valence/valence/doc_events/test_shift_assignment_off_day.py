@@ -132,6 +132,9 @@ def run():
 	roster_oct_results = run_roster_left_october_regression_tests()
 	results.extend(roster_oct_results)
 
+	hetero_results = run_heterogeneous_event_preservation_test()
+	results.extend(hetero_results)
+
 	total_passed = sum(1 for s, _, _ in results if s == "PASS")
 	total_failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== TOTAL SUMMARY ==========")
@@ -364,7 +367,27 @@ def run_roster_left_october_regression_tests():
 		employee = synth_emp.name
 		ok("Dedicated synthetic test employee created", bool(employee), employee)
 
-		# 2. Create & submit Left assignment starting on 2026-09-20 with no end date and no Shift Type
+		# Attach a dedicated synthetic Holiday List to employee
+		synth_hl = frappe.get_doc(
+			{
+				"doctype": "Holiday List",
+				"holiday_list_name": f"ZZ_Synth_HL_{frappe.generate_hash(length=8)}",
+				"from_date": "2026-01-01",
+				"to_date": "2026-12-31",
+				"holidays": [
+					{
+						"holiday_date": "2026-10-02",
+						"description": "Synth Gandhi Jayanti",
+						"weekly_off": 0,
+					}
+				],
+			}
+		)
+		synth_hl.insert(ignore_permissions=True)
+		created_records.append(("Holiday List", synth_hl.name, False))
+		frappe.db.set_value("Employee", employee, "holiday_list", synth_hl.name)
+
+		# 2. Test 1: Left assignment starting on 2026-09-20 with no end date and no Shift Type
 		sa_left = frappe.new_doc("Shift Assignment")
 		sa_left.employee = employee
 		sa_left.start_date = left_start
@@ -380,12 +403,10 @@ def run_roster_left_october_regression_tests():
 			sa_left.name,
 		)
 
-		# 3. Query Roster for October 2026
-		roster_events = get_events(oct_start, oct_end, {"name": employee}, {})
-		emp_events = roster_events.get(employee, [])
+		roster_left_events = get_events(oct_start, oct_end, {"name": employee}, {})
+		emp_left_events = roster_left_events.get(employee, [])
 
-		# 4. Verify malformed Left shift event is excluded
-		left_shift_events = [ev for ev in emp_events if ev.get("status") == "Left"]
+		left_shift_events = [ev for ev in emp_left_events if ev.get("status") == "Left"]
 		ok(
 			"Malformed Left shift event is excluded from October roster",
 			len(left_shift_events) == 0,
@@ -393,18 +414,17 @@ def run_roster_left_october_regression_tests():
 		)
 
 		null_color_shifts = [
-			ev for ev in emp_events if "name" in ev and ev.get("color") is None
+			ev for ev in emp_left_events if "start_date" in ev and ev.get("color") is None
 		]
 		ok(
-			"No shift events with color: null in October roster",
+			"No shift events with color: null in October roster (Left test)",
 			len(null_color_shifts) == 0,
 			f"found={len(null_color_shifts)}",
 		)
 
-		# 5. Verify synthetic Left cells are retained for all 31 October dates
 		oct_left_dates = {
 			ev.get("holiday_date")
-			for ev in emp_events
+			for ev in emp_left_events
 			if ev.get("description") == "Left"
 		}
 		ok(
@@ -415,13 +435,117 @@ def run_roster_left_october_regression_tests():
 		ok("October 1 is marked Left", "2026-10-01" in oct_left_dates)
 		ok("October 31 is marked Left", "2026-10-31" in oct_left_dates)
 
-		# 6. Clean up sa_left before testing active assignment
+		# Clean up sa_left using standard document lifecycle
 		doc_left = frappe.get_doc("Shift Assignment", sa_left.name)
 		doc_left.cancel()
 		frappe.delete_doc("Shift Assignment", sa_left.name, force=1, ignore_permissions=True)
 		created_records.remove(("Shift Assignment", sa_left.name, True))
 
-		# 7. Verify ordinary Active shifts and weekly offs remain intact on synthetic employee
+		# 3. Test 2: Active assignment with no Shift Type
+		sa_active_no_st = frappe.new_doc("Shift Assignment")
+		sa_active_no_st.employee = employee
+		sa_active_no_st.start_date = "2026-10-05"
+		sa_active_no_st.end_date = "2026-10-10"
+		sa_active_no_st.status = "Active"
+		sa_active_no_st.shift_type = None
+		sa_active_no_st.flags.ignore_validate = True
+		sa_active_no_st.flags.ignore_mandatory = True
+		sa_active_no_st.insert(ignore_permissions=True)
+		sa_active_no_st.submit()
+		created_records.append(("Shift Assignment", sa_active_no_st.name, True))
+		ok(
+			"Active assignment with no Shift Type submitted",
+			sa_active_no_st.docstatus == 1 and sa_active_no_st.shift_type is None,
+			sa_active_no_st.name,
+		)
+
+		roster_act_no_st = get_events(oct_start, oct_end, {"name": employee}, {})
+		emp_act_no_st_events = roster_act_no_st.get(employee, [])
+
+		act_no_st_events = [
+			ev for ev in emp_act_no_st_events
+			if ev.get("name") == sa_active_no_st.name
+		]
+		ok(
+			"Malformed Active assignment with no Shift Type is excluded from roster",
+			len(act_no_st_events) == 0,
+			f"found={len(act_no_st_events)}",
+		)
+
+		null_color_shifts_act = [
+			ev for ev in emp_act_no_st_events if "start_date" in ev and ev.get("color") is None
+		]
+		ok(
+			"No shift events with color: null in roster (Active no Shift Type)",
+			len(null_color_shifts_act) == 0,
+			f"found={len(null_color_shifts_act)}",
+		)
+
+		holiday_in_act = [
+			ev for ev in emp_act_no_st_events
+			if ev.get("description") == "Synth Gandhi Jayanti"
+		]
+		ok("Holiday preserved during Active no-shift-type test", len(holiday_in_act) == 1)
+
+		# Clean up sa_active_no_st using standard document lifecycle
+		doc_act_no_st = frappe.get_doc("Shift Assignment", sa_active_no_st.name)
+		doc_act_no_st.cancel()
+		frappe.delete_doc("Shift Assignment", sa_active_no_st.name, force=1, ignore_permissions=True)
+		created_records.remove(("Shift Assignment", sa_active_no_st.name, True))
+
+		# 4. Test 3: Inactive assignment with no Shift Type
+		sa_inact_no_st = frappe.new_doc("Shift Assignment")
+		sa_inact_no_st.employee = employee
+		sa_inact_no_st.start_date = "2026-10-05"
+		sa_inact_no_st.end_date = "2026-10-10"
+		sa_inact_no_st.status = "Inactive"
+		sa_inact_no_st.shift_type = None
+		sa_inact_no_st.flags.ignore_validate = True
+		sa_inact_no_st.flags.ignore_mandatory = True
+		sa_inact_no_st.insert(ignore_permissions=True)
+		sa_inact_no_st.submit()
+		created_records.append(("Shift Assignment", sa_inact_no_st.name, True))
+		ok(
+			"Inactive assignment with no Shift Type submitted",
+			sa_inact_no_st.docstatus == 1 and sa_inact_no_st.shift_type is None,
+			sa_inact_no_st.name,
+		)
+
+		roster_inact_no_st = get_events(oct_start, oct_end, {"name": employee}, {})
+		emp_inact_no_st_events = roster_inact_no_st.get(employee, [])
+
+		inact_no_st_events = [
+			ev for ev in emp_inact_no_st_events
+			if ev.get("name") == sa_inact_no_st.name
+		]
+		ok(
+			"Malformed Inactive assignment with no Shift Type is excluded from roster",
+			len(inact_no_st_events) == 0,
+			f"found={len(inact_no_st_events)}",
+		)
+
+		null_color_shifts_inact = [
+			ev for ev in emp_inact_no_st_events if "start_date" in ev and ev.get("color") is None
+		]
+		ok(
+			"No shift events with color: null in roster (Inactive no Shift Type)",
+			len(null_color_shifts_inact) == 0,
+			f"found={len(null_color_shifts_inact)}",
+		)
+
+		holiday_in_inact = [
+			ev for ev in emp_inact_no_st_events
+			if ev.get("description") == "Synth Gandhi Jayanti"
+		]
+		ok("Holiday preserved during Inactive no-shift-type test", len(holiday_in_inact) == 1)
+
+		# Clean up sa_inact_no_st using standard document lifecycle
+		doc_inact_no_st = frappe.get_doc("Shift Assignment", sa_inact_no_st.name)
+		doc_inact_no_st.cancel()
+		frappe.delete_doc("Shift Assignment", sa_inact_no_st.name, force=1, ignore_permissions=True)
+		created_records.remove(("Shift Assignment", sa_inact_no_st.name, True))
+
+		# 5. Test 4: Valid Active assignment with valid Shift Type
 		active_sa = frappe.new_doc("Shift Assignment")
 		active_sa.employee = employee
 		active_sa.shift_type = shift_type
@@ -446,14 +570,21 @@ def run_roster_left_october_regression_tests():
 			ok("Active shift has non-null color", active_events[0].get("color") is not None, f"color={active_events[0].get('color')}")
 			ok("Active shift has correct shift_type", active_events[0].get("shift_type") == shift_type)
 
-		holiday_wo_events = [
+		# 6. Test 5: Verify preservation of holidays and weekly offs alongside valid active shift
+		holiday_events = [
 			ev for ev in active_emp_events
-			if "holiday" in ev
+			if ev.get("description") == "Synth Gandhi Jayanti"
 		]
-		ok("Holiday / Weekly off events are retained and not filtered", len(holiday_wo_events) > 0, f"count={len(holiday_wo_events)}")
+		ok("Holiday event is preserved in roster", len(holiday_events) == 1, f"count={len(holiday_events)}")
+
+		weekly_off_events = [
+			ev for ev in active_emp_events
+			if ev.get("weekly_off") == 1 or ev.get("description") == "Weekly Off"
+		]
+		ok("Weekly off events are retained and not filtered", len(weekly_off_events) > 0, f"count={len(weekly_off_events)}")
 
 	finally:
-		# Cleanup only records created by this test; report any cleanup failures
+		# Cleanup only records created by this test; report any cleanup failures via standard lifecycle hooks
 		for doctype, docname, is_submitted in reversed(created_records):
 			try:
 				if frappe.db.exists(doctype, docname):
@@ -464,5 +595,131 @@ def run_roster_left_october_regression_tests():
 			except Exception as cleanup_err:
 				ok(f"Cleanup of {doctype} {docname}", False, str(cleanup_err))
 		frappe.db.commit()
+
+	return results
+
+
+def run_heterogeneous_event_preservation_test():
+	"""
+	Isolated event-level test verifying heterogeneous event preservation across
+	actual event schemas returned by HRMS (Shift Assignment, Leave, Holiday,
+	Weekly Off, and synthetic Left cells) without modifying database docstatus.
+	"""
+	results = []
+
+	def ok(name, cond, detail=""):
+		status = "PASS" if cond else "FAIL"
+		results.append((status, name, detail))
+		print(f"[{status}] {name}" + (f" — {detail}" if detail else ""))
+
+	from valence.valence.override.whitelisted_method.roster import (
+		_is_malformed_shift_assignment,
+		_is_shift_assignment_event,
+		apply_left_events,
+	)
+
+	valid_shift = {
+		"name": "HR-SHA-TEST-001",
+		"shift_type": "Morning",
+		"status": "Active",
+		"start_date": "2026-10-01",
+		"end_date": "2026-10-31",
+		"color": "#123456",
+	}
+	malformed_act_shift = {
+		"name": "HR-SHA-TEST-002",
+		"shift_type": None,
+		"status": "Active",
+		"start_date": "2026-10-05",
+		"end_date": "2026-10-10",
+		"color": None,
+	}
+	malformed_inact_shift = {
+		"name": "HR-SHA-TEST-003",
+		"shift_type": "",
+		"status": "Inactive",
+		"start_date": "2026-10-05",
+		"end_date": "2026-10-10",
+		"color": None,
+	}
+	left_shift = {
+		"name": "HR-SHA-TEST-004",
+		"shift_type": None,
+		"status": "Left",
+		"start_date": "2026-09-20",
+		"end_date": None,
+		"color": None,
+	}
+	leave_event = {
+		"leave": "HR-LAP-TEST-001",
+		"leave_type": "Casual Leave",
+		"from_date": "2026-10-15",
+		"to_date": "2026-10-16",
+	}
+	holiday_event = {
+		"holiday": "HR-HL-TEST-001",
+		"holiday_date": "2026-10-02",
+		"description": "Gandhi Jayanti",
+		"weekly_off": 0,
+	}
+	weekly_off_event = {
+		"holiday": "weekly-off-TEST-2026-10-04",
+		"holiday_date": "2026-10-04",
+		"description": "Weekly Off",
+		"weekly_off": 1,
+	}
+	synthetic_left_event = {
+		"holiday": "left-TEST-2026-10-20",
+		"holiday_date": "2026-10-20",
+		"description": "Left",
+	}
+
+	# 1. Discriminator unit checks
+	ok("Discriminator identifies valid Shift Assignment", _is_shift_assignment_event(valid_shift))
+	ok("Discriminator identifies malformed Active Shift Assignment", _is_shift_assignment_event(malformed_act_shift))
+	ok("Discriminator identifies malformed Inactive Shift Assignment", _is_shift_assignment_event(malformed_inact_shift))
+	ok("Discriminator identifies Left Shift Assignment", _is_shift_assignment_event(left_shift))
+	ok("Discriminator rejects Leave Application event", not _is_shift_assignment_event(leave_event))
+	ok("Discriminator rejects Holiday event", not _is_shift_assignment_event(holiday_event))
+	ok("Discriminator rejects Weekly Off event", not _is_shift_assignment_event(weekly_off_event))
+	ok("Discriminator rejects Synthetic Left cell", not _is_shift_assignment_event(synthetic_left_event))
+
+	ok("Valid shift is not flagged as malformed", not _is_malformed_shift_assignment(valid_shift))
+	ok("Active shift without shift_type is flagged as malformed", _is_malformed_shift_assignment(malformed_act_shift))
+	ok("Inactive shift with empty shift_type is flagged as malformed", _is_malformed_shift_assignment(malformed_inact_shift))
+	ok("Left shift is flagged as malformed", _is_malformed_shift_assignment(left_shift))
+	ok("Leave event is not flagged as malformed", not _is_malformed_shift_assignment(leave_event))
+	ok("Holiday event is not flagged as malformed", not _is_malformed_shift_assignment(holiday_event))
+	ok("Weekly off event is not flagged as malformed", not _is_malformed_shift_assignment(weekly_off_event))
+	ok("Synthetic Left cell is not flagged as malformed", not _is_malformed_shift_assignment(synthetic_left_event))
+
+	# 2. apply_left_events integration filtering on heterogeneous event list
+	test_emp = "ZZ_Synth_IsolatedHetero"
+	events_dict = {
+		test_emp: [
+			valid_shift,
+			malformed_act_shift,
+			malformed_inact_shift,
+			left_shift,
+			leave_event,
+			holiday_event,
+			weekly_off_event,
+			synthetic_left_event,
+		]
+	}
+
+	apply_left_events(events_dict, "2026-10-01", "2026-10-31")
+	filtered_events = events_dict.get(test_emp, [])
+
+	filtered_names = {ev.get("name") for ev in filtered_events if "name" in ev}
+	ok("Valid Shift Assignment is preserved in heterogeneous list", "HR-SHA-TEST-001" in filtered_names)
+	ok("Malformed Active Shift Assignment is removed", "HR-SHA-TEST-002" not in filtered_names)
+	ok("Malformed Inactive Shift Assignment is removed", "HR-SHA-TEST-003" not in filtered_names)
+	ok("Left Shift Assignment is removed", "HR-SHA-TEST-004" not in filtered_names)
+
+	ok("Leave Application event is preserved in heterogeneous list", leave_event in filtered_events)
+	ok("Holiday event is preserved in heterogeneous list", holiday_event in filtered_events)
+	ok("Weekly Off event is preserved in heterogeneous list", weekly_off_event in filtered_events)
+	ok("Synthetic Left event is preserved in heterogeneous list", synthetic_left_event in filtered_events)
 
 	return results

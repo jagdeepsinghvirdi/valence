@@ -129,6 +129,9 @@ def run():
 	left_results = run_left_tests()
 	results.extend(left_results)
 
+	roster_oct_results = run_roster_left_october_regression_tests()
+	results.extend(roster_oct_results)
+
 	total_passed = sum(1 for s, _, _ in results if s == "PASS")
 	total_failed = sum(1 for s, _, _ in results if s == "FAIL")
 	print("\n========== TOTAL SUMMARY ==========")
@@ -147,6 +150,7 @@ def run_left_tests():
 		print(f"[{status}] {name}" + (f" — {detail}" if detail else ""))
 
 	from valence.valence.doc_events.shift_assignment import (
+		ensure_optional_shift_type,
 		ensure_shift_assignment_status_options,
 	)
 	from valence.api import get_applicable_shift, get_applicable_shift_assignment
@@ -154,6 +158,7 @@ def run_left_tests():
 
 	# 1. Status options check
 	ensure_shift_assignment_status_options()
+	ensure_optional_shift_type()
 
 	prop_setter = frappe.db.get_value(
 		"Property Setter",
@@ -307,5 +312,157 @@ def run_left_tests():
 		frappe.db.commit()
 	except Exception:
 		pass
+
+	return results
+
+
+def run_roster_left_october_regression_tests():
+	results = []
+
+	def ok(name, cond, detail=""):
+		status = "PASS" if cond else "FAIL"
+		results.append((status, name, detail))
+		print(f"[{status}] {name}" + (f" — {detail}" if detail else ""))
+
+	from valence.valence.doc_events.shift_assignment import (
+		ensure_optional_shift_type,
+		ensure_shift_assignment_status_options,
+	)
+	from valence.valence.override.whitelisted_method.roster import get_events
+
+	ensure_shift_assignment_status_options()
+	ensure_optional_shift_type()
+
+	shift_type = frappe.db.get_value("Shift Type", {}, "name")
+	company = frappe.db.get_value("Company", {}, "name")
+	if not shift_type:
+		ok("Shift Type available for regression test", False, "No Shift Type found")
+		return results
+
+	left_start = "2026-09-20"
+	oct_start = "2026-10-01"
+	oct_end = "2026-10-31"
+
+	created_records = []  # Tracks only records created by this test: (doctype, docname, is_submitted)
+
+	try:
+		# 1. Create a dedicated synthetic test employee (isolates test, touches no sample data)
+		synth_emp = frappe.get_doc(
+			{
+				"doctype": "Employee",
+				"first_name": "ZZ_SynthTest",
+				"last_name": "RosterLeft",
+				"gender": "Prefer not to say",
+				"date_of_birth": "1995-01-01",
+				"date_of_joining": "2020-01-01",
+				"status": "Active",
+				"company": company,
+			}
+		)
+		synth_emp.insert(ignore_permissions=True)
+		created_records.append(("Employee", synth_emp.name, False))
+		employee = synth_emp.name
+		ok("Dedicated synthetic test employee created", bool(employee), employee)
+
+		# 2. Create & submit Left assignment starting on 2026-09-20 with no end date and no Shift Type
+		sa_left = frappe.new_doc("Shift Assignment")
+		sa_left.employee = employee
+		sa_left.start_date = left_start
+		sa_left.status = "Left"
+		sa_left.shift_type = None
+		sa_left.end_date = None
+		sa_left.insert(ignore_permissions=True)
+		sa_left.submit()
+		created_records.append(("Shift Assignment", sa_left.name, True))
+		ok(
+			"Left assignment starting 2026-09-20 (no end date, no Shift Type) submitted",
+			sa_left.docstatus == 1 and sa_left.shift_type is None,
+			sa_left.name,
+		)
+
+		# 3. Query Roster for October 2026
+		roster_events = get_events(oct_start, oct_end, {"name": employee}, {})
+		emp_events = roster_events.get(employee, [])
+
+		# 4. Verify malformed Left shift event is excluded
+		left_shift_events = [ev for ev in emp_events if ev.get("status") == "Left"]
+		ok(
+			"Malformed Left shift event is excluded from October roster",
+			len(left_shift_events) == 0,
+			f"found={len(left_shift_events)}",
+		)
+
+		null_color_shifts = [
+			ev for ev in emp_events if "name" in ev and ev.get("color") is None
+		]
+		ok(
+			"No shift events with color: null in October roster",
+			len(null_color_shifts) == 0,
+			f"found={len(null_color_shifts)}",
+		)
+
+		# 5. Verify synthetic Left cells are retained for all 31 October dates
+		oct_left_dates = {
+			ev.get("holiday_date")
+			for ev in emp_events
+			if ev.get("description") == "Left"
+		}
+		ok(
+			"Synthetic Left cells retained for all 31 October dates",
+			len(oct_left_dates) == 31,
+			f"count={len(oct_left_dates)}",
+		)
+		ok("October 1 is marked Left", "2026-10-01" in oct_left_dates)
+		ok("October 31 is marked Left", "2026-10-31" in oct_left_dates)
+
+		# 6. Clean up sa_left before testing active assignment
+		doc_left = frappe.get_doc("Shift Assignment", sa_left.name)
+		doc_left.cancel()
+		frappe.delete_doc("Shift Assignment", sa_left.name, force=1, ignore_permissions=True)
+		created_records.remove(("Shift Assignment", sa_left.name, True))
+
+		# 7. Verify ordinary Active shifts and weekly offs remain intact on synthetic employee
+		active_sa = frappe.new_doc("Shift Assignment")
+		active_sa.employee = employee
+		active_sa.shift_type = shift_type
+		active_sa.start_date = "2026-10-01"
+		active_sa.end_date = "2026-10-15"
+		active_sa.status = "Active"
+		active_sa.custom_off_day = "Sunday"
+		active_sa.insert(ignore_permissions=True)
+		active_sa.submit()
+		created_records.append(("Shift Assignment", active_sa.name, True))
+		ok("Ordinary Active shift submitted for October", active_sa.docstatus == 1, active_sa.name)
+
+		roster_active = get_events(oct_start, oct_end, {"name": employee}, {})
+		active_emp_events = roster_active.get(employee, [])
+
+		active_events = [
+			ev for ev in active_emp_events
+			if ev.get("name") == active_sa.name and ev.get("status") == "Active"
+		]
+		ok("Active shift event is retained in October roster", len(active_events) == 1, f"found={len(active_events)}")
+		if active_events:
+			ok("Active shift has non-null color", active_events[0].get("color") is not None, f"color={active_events[0].get('color')}")
+			ok("Active shift has correct shift_type", active_events[0].get("shift_type") == shift_type)
+
+		holiday_wo_events = [
+			ev for ev in active_emp_events
+			if "holiday" in ev
+		]
+		ok("Holiday / Weekly off events are retained and not filtered", len(holiday_wo_events) > 0, f"count={len(holiday_wo_events)}")
+
+	finally:
+		# Cleanup only records created by this test; report any cleanup failures
+		for doctype, docname, is_submitted in reversed(created_records):
+			try:
+				if frappe.db.exists(doctype, docname):
+					if is_submitted and frappe.db.get_value(doctype, docname, "docstatus") == 1:
+						doc = frappe.get_doc(doctype, docname)
+						doc.cancel()
+					frappe.delete_doc(doctype, docname, force=1, ignore_permissions=True)
+			except Exception as cleanup_err:
+				ok(f"Cleanup of {doctype} {docname}", False, str(cleanup_err))
+		frappe.db.commit()
 
 	return results

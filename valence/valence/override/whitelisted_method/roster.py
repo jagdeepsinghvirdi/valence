@@ -87,6 +87,11 @@ def apply_left_events(events, month_start, month_end):
     if not events:
         return
 
+    # Filter Shift Assignment events with status 'Left' from the roster event lists
+    # before processing synthetic Left cells, while preserving all employee keys.
+    for emp in events:
+        events[emp] = [ev for ev in events[emp] if ev.get("status") != "Left"]
+
     from datetime import timedelta
 
     m_start = getdate(month_start)

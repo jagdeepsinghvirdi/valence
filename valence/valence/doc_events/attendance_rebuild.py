@@ -2,7 +2,14 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, get_datetime, getdate, nowdate
 
-PROTECTED_STATUSES = ("On Leave", "Work From Home", "On Duty", "Present With Short Leave")
+PROTECTED_STATUSES = (
+	"On Leave",
+	"Work From Home",
+	"On Duty",
+	"Present With Short Leave",
+	"Holiday",
+	"Weekly Off",
+)
 
 
 @frappe.whitelist()
@@ -154,6 +161,11 @@ def rebuild_date(employee_doc, date_obj):
 	if not within_employment(employee_doc, date_obj):
 		return result_row(date_str, "skipped", None, _("Outside employment period"))
 
+	frappe.db.sql(
+		"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+		(employee_doc.name,),
+	)
+
 	existing = frappe.db.get_value(
 		"Attendance",
 		{"employee": employee_doc.name, "attendance_date": date_obj, "docstatus": ["<", 2]},
@@ -279,9 +291,14 @@ def apply_to_existing(existing, shift, status, hours, in_time, out_time, date_st
 	current = frappe.db.get_value(
 		"Attendance",
 		existing.name,
-		["status", "working_hours", "in_time", "out_time", "shift"],
+		["status", "working_hours", "in_time", "out_time", "shift", "leave_application", "attendance_request"],
 		as_dict=True,
 	)
+	if not current:
+		return result_row(date_str, "skipped", None, _("Record not found"), existing.name)
+
+	if is_protected(current):
+		return result_row(date_str, "skipped", current.status, _("Leave or request record kept as is"), existing.name)
 
 	unchanged = (
 		current.status == status
@@ -310,6 +327,22 @@ def apply_to_existing(existing, shift, status, hours, in_time, out_time, date_st
 
 
 def create_attendance(employee_doc, date_obj, shift, status, hours, in_time, out_time, date_str):
+	frappe.db.sql(
+		"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+		(employee_doc.name,),
+	)
+
+	existing = frappe.db.get_value(
+		"Attendance",
+		{"employee": employee_doc.name, "attendance_date": date_obj, "docstatus": ["<", 2]},
+		["name", "status", "leave_application", "attendance_request", "docstatus"],
+		as_dict=True,
+	)
+	if existing:
+		if is_protected(existing):
+			return result_row(date_str, "skipped", existing.status, _("Leave or request record kept as is"), existing.name)
+		return apply_to_existing(existing, shift, status, hours, in_time, out_time, date_str)
+
 	doc = frappe.get_doc(
 		{
 			"doctype": "Attendance",

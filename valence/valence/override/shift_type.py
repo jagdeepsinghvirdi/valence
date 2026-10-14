@@ -52,6 +52,20 @@ class ShiftType(_ShiftType):
 
 		return None, None
 
+	def get_marked_attendance_dates_between(
+		self, employee: str, start_date: "datetime.date", end_date: "datetime.date"
+	) -> list["datetime.date"]:
+		AttendanceDoc = frappe.qb.DocType("Attendance")
+		return (
+			frappe.qb.from_(AttendanceDoc)
+			.select(AttendanceDoc.attendance_date)
+			.where(
+				(AttendanceDoc.employee == employee)
+				& (AttendanceDoc.docstatus < 2)
+				& (AttendanceDoc.attendance_date.between(start_date, end_date))
+			)
+		).run(pluck=True)
+
 	def get_dates_for_attendance(self, employee: str) -> list[str]:
 		start_date, end_date = self.get_start_and_end_dates(employee)
 
@@ -71,8 +85,20 @@ class ShiftType(_ShiftType):
 	def mark_absent_for_dates_with_no_attendance(self, employee: str):
 		from valence.api import get_applicable_shift, get_day_type
 
+		frappe.db.sql(
+			"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+			(employee,),
+		)
+
 		for date in self.get_dates_for_attendance(employee):
 			if get_applicable_shift(employee, date) != self.name:
+				continue
+
+			# Double-check inside locked transaction
+			if frappe.db.exists(
+				"Attendance",
+				{"employee": employee, "attendance_date": date, "docstatus": ("<", 2)},
+			):
 				continue
 
 			status = get_day_type(employee, date) or "Absent"

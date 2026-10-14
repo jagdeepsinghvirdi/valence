@@ -7,8 +7,6 @@ PROTECTED_STATUSES = (
 	"Work From Home",
 	"On Duty",
 	"Present With Short Leave",
-	"Holiday",
-	"Weekly Off",
 )
 
 
@@ -161,10 +159,25 @@ def rebuild_date(employee_doc, date_obj):
 	if not within_employment(employee_doc, date_obj):
 		return result_row(date_str, "skipped", None, _("Outside employment period"))
 
-	frappe.db.sql(
-		"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
-		(employee_doc.name,),
-	)
+	try:
+		frappe.db.sql(
+			"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+			(employee_doc.name,),
+		)
+	except frappe.QueryDeadlockError:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=_("Attendance Rebuild deadlock for {0} on {1}").format(employee_doc.name, date_str),
+			message=frappe.get_traceback(),
+		)
+		return result_row(date_str, "skipped", None, _("Database deadlock during rebuild. Please retry."), None)
+	except frappe.QueryTimeoutError:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=_("Attendance Rebuild lock timeout for {0} on {1}").format(employee_doc.name, date_str),
+			message=frappe.get_traceback(),
+		)
+		return result_row(date_str, "skipped", None, _("Lock wait timeout during rebuild. Please retry."), None)
 
 	existing = frappe.db.get_value(
 		"Attendance",
@@ -174,15 +187,25 @@ def rebuild_date(employee_doc, date_obj):
 	)
 
 	if existing and is_protected(existing):
-		return result_row(date_str, "skipped", existing.status, _("Leave or request record kept as is"))
+		return result_row(date_str, "skipped", existing.status, get_protected_reason(existing), existing.name)
 
 	shift = get_applicable_shift(employee_doc.name, date_obj)
 	day_type = get_day_type(employee_doc.name, date_obj)
 	in_time, out_time = get_punch_pair(employee_doc.name, date_obj, shift)
 
+	# If it's an existing Holiday or Weekly Off and there are no valid punches, preserve it
+	if existing and existing.status in ("Holiday", "Weekly Off") and not (in_time and out_time):
+		return result_row(
+			date_str,
+			"skipped",
+			existing.status,
+			_("Preserved {0} without check-ins").format(existing.status),
+			existing.name,
+		)
+
 	if not shift and not day_type and not in_time and not out_time:
 		if existing:
-			return result_row(date_str, "skipped", existing.status, _("No shift assigned"))
+			return result_row(date_str, "skipped", existing.status, _("No shift assigned"), existing.name)
 		return result_row(date_str, "skipped", None, _("No shift assigned and no punches"))
 
 	status, hours = resolve_status(employee_doc.name, date_obj, shift, day_type, in_time, out_time)
@@ -206,10 +229,28 @@ def within_employment(employee_doc, date_obj):
 
 
 def is_protected(existing):
-	if existing.leave_application or existing.attendance_request:
+	leave_app = existing.get("leave_application") if isinstance(existing, dict) else getattr(existing, "leave_application", None)
+	att_req = existing.get("attendance_request") if isinstance(existing, dict) else getattr(existing, "attendance_request", None)
+	status = existing.get("status") if isinstance(existing, dict) else getattr(existing, "status", None)
+
+	if leave_app or att_req:
 		return True
 
-	return existing.status in PROTECTED_STATUSES
+	return status in PROTECTED_STATUSES
+
+
+def get_protected_reason(existing):
+	leave_app = existing.get("leave_application") if isinstance(existing, dict) else getattr(existing, "leave_application", None)
+	att_req = existing.get("attendance_request") if isinstance(existing, dict) else getattr(existing, "attendance_request", None)
+	status = existing.get("status") if isinstance(existing, dict) else getattr(existing, "status", None)
+
+	if leave_app:
+		return _("Protected by Leave Application: {0}").format(leave_app)
+	if att_req:
+		return _("Protected by Attendance Request: {0}").format(att_req)
+	if status in PROTECTED_STATUSES:
+		return _("Protected status ({0}) preserved").format(status)
+	return _("Record protected from rebuild")
 
 
 def get_punch_pair(employee, date_obj, shift):
@@ -298,7 +339,7 @@ def apply_to_existing(existing, shift, status, hours, in_time, out_time, date_st
 		return result_row(date_str, "skipped", None, _("Record not found"), existing.name)
 
 	if is_protected(current):
-		return result_row(date_str, "skipped", current.status, _("Leave or request record kept as is"), existing.name)
+		return result_row(date_str, "skipped", current.status, get_protected_reason(current), existing.name)
 
 	unchanged = (
 		current.status == status
@@ -308,7 +349,12 @@ def apply_to_existing(existing, shift, status, hours, in_time, out_time, date_st
 		and (current.shift or None) == (shift or None)
 	)
 	if unchanged:
-		return result_row(date_str, "skipped", status, _("Already correct"), existing.name)
+		note = (
+			_("Preserved {0} without check-ins").format(current.status)
+			if current.status in ("Holiday", "Weekly Off") and not (in_time and out_time)
+			else _("Already correct")
+		)
+		return result_row(date_str, "skipped", status, note, existing.name)
 
 	frappe.db.set_value(
 		"Attendance",
@@ -327,10 +373,29 @@ def apply_to_existing(existing, shift, status, hours, in_time, out_time, date_st
 
 
 def create_attendance(employee_doc, date_obj, shift, status, hours, in_time, out_time, date_str):
-	frappe.db.sql(
-		"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
-		(employee_doc.name,),
-	)
+	try:
+		frappe.db.sql(
+			"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+			(employee_doc.name,),
+		)
+	except frappe.QueryDeadlockError:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=_("Attendance Rebuild deadlock in create_attendance for {0} on {1}").format(
+				employee_doc.name, date_str
+			),
+			message=frappe.get_traceback(),
+		)
+		return result_row(date_str, "skipped", None, _("Database deadlock during rebuild. Please retry."), None)
+	except frappe.QueryTimeoutError:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=_("Attendance Rebuild lock timeout in create_attendance for {0} on {1}").format(
+				employee_doc.name, date_str
+			),
+			message=frappe.get_traceback(),
+		)
+		return result_row(date_str, "skipped", None, _("Lock wait timeout during rebuild. Please retry."), None)
 
 	existing = frappe.db.get_value(
 		"Attendance",
@@ -340,7 +405,15 @@ def create_attendance(employee_doc, date_obj, shift, status, hours, in_time, out
 	)
 	if existing:
 		if is_protected(existing):
-			return result_row(date_str, "skipped", existing.status, _("Leave or request record kept as is"), existing.name)
+			return result_row(date_str, "skipped", existing.status, get_protected_reason(existing), existing.name)
+		if existing.status in ("Holiday", "Weekly Off") and not (in_time and out_time):
+			return result_row(
+				date_str,
+				"skipped",
+				existing.status,
+				_("Preserved {0} without check-ins").format(existing.status),
+				existing.name,
+			)
 		return apply_to_existing(existing, shift, status, hours, in_time, out_time, date_str)
 
 	doc = frappe.get_doc(

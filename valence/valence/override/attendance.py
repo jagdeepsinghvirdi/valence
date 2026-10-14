@@ -11,10 +11,37 @@ from hrms.hr.doctype.attendance.attendance import (
 def lock_employee(employee: str | None):
 	if not employee:
 		return
-	frappe.db.sql(
-		"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
-		(employee,),
-	)
+	try:
+		frappe.db.sql(
+			"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+			(employee,),
+		)
+	except frappe.QueryDeadlockError:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=_("Deadlock detected for Employee {0}").format(employee),
+			message=frappe.get_traceback(),
+		)
+		frappe.throw(
+			_("A database deadlock occurred while locking employee {0}. The transaction has been rolled back. Please retry.").format(
+				frappe.bold(employee)
+			),
+			title=_("Database Deadlock"),
+			exc=frappe.QueryDeadlockError,
+		)
+	except frappe.QueryTimeoutError:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=_("Lock wait timeout for Employee {0}").format(employee),
+			message=frappe.get_traceback(),
+		)
+		frappe.throw(
+			_("Could not acquire lock for employee {0} due to concurrent attendance processing (lock wait timeout). The transaction has been rolled back. Please retry.").format(
+				frappe.bold(employee)
+			),
+			title=_("Lock Timeout"),
+			exc=frappe.QueryTimeoutError,
+		)
 
 
 class Attendance(_Attendance):

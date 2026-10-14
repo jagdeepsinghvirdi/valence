@@ -22,11 +22,38 @@ class AttendanceRequest(_AttendanceRequest):
 		return frappe.get_doc("Attendance", attendance_name) if attendance_name else None
 
 	def create_or_update_attendance(self, date: str):
-		# Transaction-level row lock on the employee
-		frappe.db.sql(
-			"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
-			(self.employee,),
-		)
+		try:
+			# Transaction-level row lock on the employee
+			frappe.db.sql(
+				"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
+				(self.employee,),
+			)
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			frappe.log_error(
+				title=_("Deadlock on Attendance Request for {0} on {1}").format(self.employee, date),
+				message=frappe.get_traceback(),
+			)
+			frappe.throw(
+				_("A database deadlock occurred while processing Attendance Request for employee {0}. The transaction has been rolled back. Please retry submitting the request.").format(
+					frappe.bold(self.employee)
+				),
+				title=_("Database Deadlock"),
+				exc=frappe.QueryDeadlockError,
+			)
+		except frappe.QueryTimeoutError:
+			frappe.db.rollback()
+			frappe.log_error(
+				title=_("Lock timeout on Attendance Request for {0} on {1}").format(self.employee, date),
+				message=frappe.get_traceback(),
+			)
+			frappe.throw(
+				_("Could not acquire lock for employee {0} due to concurrent attendance processing (lock wait timeout). The transaction has been rolled back. Please retry submitting the request.").format(
+					frappe.bold(self.employee)
+				),
+				title=_("Lock Timeout"),
+				exc=frappe.QueryTimeoutError,
+			)
 
 		doc = self.get_attendance_doc(date)
 		status = self.get_attendance_status(date)
@@ -49,11 +76,38 @@ class AttendanceRequest(_AttendanceRequest):
 			new_doc.submit()
 		except DuplicateAttendanceError:
 			# Concurrent creation or race condition: re-fetch and update the existing record
+			# The employee lock is STILL HELD and the transaction is valid.
 			existing_doc = self.get_attendance_doc(date)
 			if existing_doc:
 				self._update_existing_attendance(existing_doc, status, date)
 			else:
 				raise
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			frappe.log_error(
+				title=_("Deadlock inserting Attendance Request for {0} on {1}").format(self.employee, date),
+				message=frappe.get_traceback(),
+			)
+			frappe.throw(
+				_("A database deadlock occurred while creating attendance for employee {0} on {1}. The transaction has been rolled back. Please retry submitting the request.").format(
+					frappe.bold(self.employee), format_date(date)
+				),
+				title=_("Database Deadlock"),
+				exc=frappe.QueryDeadlockError,
+			)
+		except frappe.QueryTimeoutError:
+			frappe.db.rollback()
+			frappe.log_error(
+				title=_("Lock timeout inserting Attendance Request for {0} on {1}").format(self.employee, date),
+				message=frappe.get_traceback(),
+			)
+			frappe.throw(
+				_("Could not acquire lock for employee {0} on {1} due to concurrent attendance processing (lock wait timeout). The transaction has been rolled back. Please retry submitting the request.").format(
+					frappe.bold(self.employee), format_date(date)
+				),
+				title=_("Lock Timeout"),
+				exc=frappe.QueryTimeoutError,
+			)
 
 	def _update_existing_attendance(self, doc, status, date):
 		old_status = doc.status

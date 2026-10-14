@@ -1,7 +1,7 @@
 import frappe
 from frappe import _
 from frappe.utils import add_days, cint, getdate
-from hrms.hr.doctype.attendance.attendance import mark_attendance
+from hrms.hr.doctype.attendance.attendance import DuplicateAttendanceError, mark_attendance
 from hrms.hr.doctype.shift_type.shift_type import ShiftType as _ShiftType
 from hrms.utils import get_date_range
 
@@ -84,17 +84,22 @@ class ShiftType(_ShiftType):
 
 	def mark_absent_for_dates_with_no_attendance(self, employee: str):
 		from valence.api import get_applicable_shift, get_day_type
+		from valence.valence.override.attendance import lock_employee
 
-		frappe.db.sql(
-			"SELECT name FROM `tabEmployee` WHERE name = %s FOR UPDATE",
-			(employee,),
-		)
+		dates = self.get_dates_for_attendance(employee)
+		if not dates:
+			return
 
-		for date in self.get_dates_for_attendance(employee):
-			if get_applicable_shift(employee, date) != self.name:
-				continue
+		applicable_dates = [d for d in dates if get_applicable_shift(employee, d) == self.name]
+		if not applicable_dates:
+			return
 
-			# Double-check inside locked transaction
+		# Atomic batch design: Lock employee row for the caller's transaction.
+		# The caller owns the transaction boundary (commit/rollback).
+		lock_employee(employee)
+
+		for date in applicable_dates:
+			# Skip if attendance already exists; do NOT roll back caller's transaction
 			if frappe.db.exists(
 				"Attendance",
 				{"employee": employee, "attendance_date": date, "docstatus": ("<", 2)},
@@ -102,7 +107,23 @@ class ShiftType(_ShiftType):
 				continue
 
 			status = get_day_type(employee, date) or "Absent"
-			attendance = mark_attendance(employee, date, status, self.name)
+			try:
+				attendance = mark_attendance(employee, date, status, self.name)
+			except DuplicateAttendanceError:
+				# Concurrently marked; safe to skip without rolling back caller's transaction
+				continue
+			except frappe.QueryDeadlockError:
+				frappe.log_error(
+					title=_("Deadlock marking absent for {0} on {1}").format(employee, date),
+					message=frappe.get_traceback(),
+				)
+				raise
+			except frappe.QueryTimeoutError:
+				frappe.log_error(
+					title=_("Lock timeout marking absent for {0} on {1}").format(employee, date),
+					message=frappe.get_traceback(),
+				)
+				raise
 
 			if not attendance or status != "Absent":
 				continue

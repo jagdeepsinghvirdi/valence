@@ -173,6 +173,7 @@ override_doctype_class = {
 	"Delivery Note":"valence.valence.override.delivery_note.DeliveryNote",
 	"Quality Inspection":"valence.valence.override.quality_inspection.QualityInspection",
     "Attendance":"valence.valence.override.attendance.Attendance",
+    "Attendance Request": "valence.valence.override.attendance_request.AttendanceRequest",
     "Shift Type":"valence.valence.override.shift_type.ShiftType",
     "Leave Application": "valence.valence.override.leave_application.LeaveApplication",
     "Leave Allocation": "valence.valence.override.leave_allocation.LeaveAllocation",

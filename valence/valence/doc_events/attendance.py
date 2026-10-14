@@ -374,9 +374,18 @@ def calculate_punch_pair_duration(checkins) -> float:
 					if (dt - prev_out).total_seconds() <= 1800 and dt > prev_in:
 						intervals[-1] = (prev_in, dt)
 	else:
-		# If log_type is not specified, pair alternating punches: (0,1), (2,3), ...
-		for i in range(0, len(parsed) - 1, 2):
-			t_in, t_out = parsed[i][0], parsed[i + 1][0]
+		# If log_type is not specified, collapse repeated punches made within 30 minutes
+		# of each other (the same rule used for consecutive INs above) so a duplicate
+		# punch does not shift the alternating pairing and orphan the final punch.
+		collapsed = []
+		for dt, _log_type in parsed:
+			if collapsed and (dt - collapsed[-1]).total_seconds() <= 1800:
+				continue
+			collapsed.append(dt)
+
+		# Pair alternating punches: (0,1), (2,3), ...
+		for i in range(0, len(collapsed) - 1, 2):
+			t_in, t_out = collapsed[i], collapsed[i + 1]
 			if t_out > t_in:
 				intervals.append((t_in, t_out))
 

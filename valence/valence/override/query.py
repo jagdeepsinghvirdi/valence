@@ -239,15 +239,15 @@ def _request_query(doctype: str, user: str | None = None) -> str:
 		if doctype == "Leave Application":
 			conditions.append(f"{table}.`leave_approver` = {frappe.db.escape(user)}")
 		if employee and employee.department:
+			departments = _department_descendants(employee.department)
+			department_list = ", ".join(frappe.db.escape(name) for name in departments)
 			if doctype == "Leave Application":
-				conditions.append(
-					f"{table}.`department` = {frappe.db.escape(employee.department)}"
-				)
+				conditions.append(f"{table}.`department` in ({department_list})")
 			conditions.append(
 				(
 					f"{table}.`employee` in ("
 					"select `name` from `tabEmployee` "
-					f"where `department` = {frappe.db.escape(employee.department)})"
+					f"where `department` in ({department_list}))"
 				)
 			)
 
@@ -290,7 +290,7 @@ def _request_has_permission(doc, user: str | None = None):
 		doc_dept = getattr(doc, "department", None)
 		if not doc_dept and getattr(doc, "employee", None):
 			doc_dept = frappe.db.get_value("Employee", doc.employee, "department")
-		if doc_dept and doc_dept == employee.department:
+		if doc_dept and doc_dept in _department_descendants(employee.department):
 			return True
 
 	return False

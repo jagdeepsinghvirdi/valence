@@ -160,6 +160,43 @@ class StockEntry(_StockEntry):
 		self._set_wip_difference_account()
 		super().validate()
 
+	def on_submit(self):
+		super().on_submit()
+		self._repost_outputs_after_consumption_change()
+
+	def on_cancel(self):
+		super().on_cancel()
+		self._repost_outputs_after_consumption_change()
+
+	def _repost_outputs_after_consumption_change(self) -> None:
+		"""A consumption submitted or cancelled after the work order's output exists changes the
+		output's cost; ERPNext does not revalue it, so queue a repost of each submitted output.
+		The repost recomputes the output value and its Work In Progress clearing line."""
+		if self.purpose != "Material Consumption for Manufacture" or not self._get_wip_account():
+			return
+		outputs = frappe.get_all(
+			"Stock Entry",
+			filters={"work_order": self.work_order, "docstatus": 1, "purpose": "Manufacture"},
+			fields=["name", "posting_date", "posting_time"],
+		)
+		for output in outputs:
+			repost = frappe.get_doc(
+				{
+					"doctype": "Repost Item Valuation",
+					"based_on": "Transaction",
+					"voucher_type": "Stock Entry",
+					"voucher_no": output.name,
+					"posting_date": output.posting_date,
+					"posting_time": output.posting_time,
+					"company": self.company,
+					"allow_negative_stock": 1,
+				}
+			)
+			repost.flags.ignore_permissions = True
+			repost.flags.ignore_links = True
+			repost.insert()
+			repost.submit()
+
 	def get_basic_rate_for_manufactured_item(
 		self, finished_item_qty, outgoing_items_cost=0, has_consumption_basis=False
 	):

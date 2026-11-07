@@ -134,19 +134,21 @@ class StockEntry(_StockEntry):
 		)
 		if not row:
 			return gl_entries
+		adjustment_account = frappe.get_cached_value("Company", self.company, "stock_adjustment_account")
+		cost_center = row.cost_center or frappe.get_cached_value("Company", self.company, "cost_center")
 		remarks = _("Work In Progress cleared to output for {0}").format(self.work_order)
 		# Output rows keep their normal Dr Stock / Cr Stock Adjustment; this pair moves the consumed
 		# cost out of Work In Progress, so Stock Adjustment nets to zero except any by-product excess.
 		gl_entries.append(
 			self.get_gl_dict(
-				{"account": account, "against": row.expense_account, "remarks": remarks,
+				{"account": account, "against": adjustment_account, "remarks": remarks,
 				 "credit": amount, "credit_in_account_currency": amount},
 				item=row,
 			)
 		)
 		gl_entries.append(
 			self.get_gl_dict(
-				{"account": row.expense_account, "against": account, "cost_center": row.cost_center,
+				{"account": adjustment_account, "against": account, "cost_center": cost_center,
 				 "remarks": remarks, "debit": amount, "debit_in_account_currency": amount},
 				item=row,
 			)

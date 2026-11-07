@@ -60,8 +60,44 @@ class StockEntry(_StockEntry):
 		super().get_items()
 		self._drop_raw_materials_for_consumption_costing()
 
+	def _get_wip_account(self):
+		"""WIP account for work-order consumption / consumption-costed Manufacture; None = feature off."""
+		if not self.work_order:
+			return None
+		if self.purpose == "Material Consumption for Manufacture":
+			pass
+		elif self.purpose == "Manufacture" and self._uses_consumption_entry_cost():
+			pass
+		else:
+			return None
+		if not frappe.get_meta("Manufacturing Settings").has_field("custom_wip_account"):
+			return None
+		account = frappe.db.get_single_value("Manufacturing Settings", "custom_wip_account")
+		if not account:
+			return None
+		acc = frappe.get_cached_value("Account", account, ["company", "report_type", "account_type"], as_dict=True)
+		if not acc or acc.company != self.company:
+			return None
+		if acc.report_type != "Balance Sheet" or acc.account_type == "Stock":
+			frappe.throw(
+				_("Work In Progress Account {0} must be a Balance Sheet account that is not of type Stock").format(
+					get_link_to_form("Account", account)
+				)
+			)
+		return account
+
+	def _set_wip_difference_account(self) -> None:
+		"""Consumption: Dr WIP / Cr stock. Manufacture (FG + scrap rows): Dr stock / Cr WIP."""
+		account = self._get_wip_account()
+		if not account:
+			return
+		for row in self.get("items") or []:
+			if self.purpose == "Material Consumption for Manufacture" or row.t_warehouse:
+				row.expense_account = account
+
 	def validate(self):
 		self._drop_raw_materials_for_consumption_costing()
+		self._set_wip_difference_account()
 		super().validate()
 
 	def get_basic_rate_for_manufactured_item(

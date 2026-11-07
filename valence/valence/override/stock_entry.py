@@ -61,14 +61,8 @@ class StockEntry(_StockEntry):
 		self._drop_raw_materials_for_consumption_costing()
 
 	def _get_wip_account(self):
-		"""WIP account for work-order consumption / consumption-costed Manufacture; None = feature off."""
-		if not self.work_order:
-			return None
-		if self.purpose == "Material Consumption for Manufacture":
-			pass
-		elif self.purpose == "Manufacture" and self._uses_consumption_entry_cost():
-			pass
-		else:
+		"""Work In Progress account for work-order consumption / manufacture; None = feature off."""
+		if not self.work_order or self.purpose not in ("Material Consumption for Manufacture", "Manufacture"):
 			return None
 		if not frappe.get_meta("Manufacturing Settings").has_field("custom_wip_account"):
 			return None
@@ -87,13 +81,77 @@ class StockEntry(_StockEntry):
 		return account
 
 	def _set_wip_difference_account(self) -> None:
-		"""Consumption: Dr WIP / Cr stock. Manufacture (FG + scrap rows): Dr stock / Cr WIP."""
+		"""Consumption against a work order: Dr Work In Progress / Cr stock (instead of Stock Adjustment)."""
+		if self.purpose != "Material Consumption for Manufacture":
+			return
 		account = self._get_wip_account()
 		if not account:
 			return
 		for row in self.get("items") or []:
-			if self.purpose == "Material Consumption for Manufacture" or row.t_warehouse:
-				row.expense_account = account
+			row.expense_account = account
+
+	def _get_wip_to_clear(self, account) -> float:
+		"""Work In Progress still held for this work order, capped at this entry's output value."""
+		consumption = frappe.get_all(
+			"Stock Entry",
+			filters={"work_order": self.work_order, "docstatus": 1, "purpose": "Material Consumption for Manufacture"},
+			pluck="name",
+		)
+		if not consumption:
+			return 0.0
+		held = frappe.db.sql(
+			"""select coalesce(sum(debit - credit), 0) from `tabGL Entry`
+			where account = %s and is_cancelled = 0 and voucher_type = 'Stock Entry' and voucher_no in %s""",
+			(account, tuple(consumption)),
+		)[0][0]
+		other_outputs = frappe.get_all(
+			"Stock Entry",
+			filters={"work_order": self.work_order, "docstatus": 1, "purpose": "Manufacture", "name": ["!=", self.name]},
+			pluck="name",
+		)
+		cleared = 0.0
+		if other_outputs:
+			cleared = frappe.db.sql(
+				"""select coalesce(sum(credit - debit), 0) from `tabGL Entry`
+				where account = %s and is_cancelled = 0 and voucher_type = 'Stock Entry' and voucher_no in %s""",
+				(account, tuple(other_outputs)),
+			)[0][0]
+		output_value = sum(flt(d.amount) for d in self.get("items") or [] if d.t_warehouse)
+		return max(0.0, min(flt(held) - flt(cleared), output_value))
+
+	def get_gl_entries(self, warehouse_account):
+		gl_entries = super().get_gl_entries(warehouse_account)
+		if self.purpose != "Manufacture" or cint(self.is_return):
+			return gl_entries
+		account = self._get_wip_account()
+		if not account:
+			return gl_entries
+		amount = flt(self._get_wip_to_clear(account), self.get_debit_field_precision())
+		if amount <= 0:
+			return gl_entries
+		row = next((d for d in self.items if cint(d.is_finished_item)), None) or next(
+			(d for d in self.items if d.t_warehouse), None
+		)
+		if not row:
+			return gl_entries
+		remarks = _("Work In Progress cleared to output for {0}").format(self.work_order)
+		# Output rows keep their normal Dr Stock / Cr Stock Adjustment; this pair moves the consumed
+		# cost out of Work In Progress, so Stock Adjustment nets to zero except any by-product excess.
+		gl_entries.append(
+			self.get_gl_dict(
+				{"account": account, "against": row.expense_account, "remarks": remarks,
+				 "credit": amount, "credit_in_account_currency": amount},
+				item=row,
+			)
+		)
+		gl_entries.append(
+			self.get_gl_dict(
+				{"account": row.expense_account, "against": account, "cost_center": row.cost_center,
+				 "remarks": remarks, "debit": amount, "debit_in_account_currency": amount},
+				item=row,
+			)
+		)
+		return gl_entries
 
 	def validate(self):
 		self._drop_raw_materials_for_consumption_costing()

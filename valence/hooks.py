@@ -110,6 +110,7 @@ after_migrate = [
     "valence.valence.setup.short_leave_workflow.after_migrate",
     "valence.valence.doc_events.shift_assignment.after_migrate",
     "valence.valence.doc_events.employee.after_migrate",
+    "valence.valence.doc_events.orphan_fields.remove_orphan_table_custom_fields",
 ]
 
 # Uninstallation

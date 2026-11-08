@@ -158,7 +158,22 @@ class StockEntry(_StockEntry):
 	def validate(self):
 		self._drop_raw_materials_for_consumption_costing()
 		self._set_wip_difference_account()
+		self._set_project_capex_account()
 		super().validate()
+
+	def _set_project_capex_account(self):
+		"""Material Issue out of the project store → project capex account (see doc_events/capex_routing.py)."""
+		if self.purpose != "Material Issue" or cint(self.is_return):
+			return
+		from valence.valence.doc_events.capex_routing import get_settings, issue_account_for_row
+
+		settings = get_settings()
+		if not settings:
+			return
+		for row in self.items:
+			account = issue_account_for_row(self.company, row, settings)
+			if account:
+				row.expense_account = account
 
 	def on_submit(self):
 		super().on_submit()

@@ -219,7 +219,17 @@ doc_events = {
 		"validate":"valence.valence.doc_events.item_group.set_abbr_for_item_group"
 	},
 	"Purchase Receipt":{
-		"before_submit":"valence.valence.doc_events.purchase_receipt.before_submit"
+		"before_submit":"valence.valence.doc_events.purchase_receipt.before_submit",
+		"validate":"valence.valence.doc_events.capex_routing.purchase_receipt_validate"
+	},
+	"Purchase Invoice":{
+		"validate":"valence.valence.doc_events.capex_routing.purchase_receipt_validate"
+	},
+	"Purchase Order":{
+		"validate":"valence.valence.doc_events.capex_routing.purchase_order_validate"
+	},
+	"Material Request":{
+		"validate":"valence.valence.doc_events.capex_routing.material_request_validate"
 	},
 	("Material Request","Purchase Order","Stock Entry","Quality Inspection","Test Requisition Form") :{
       "before_insert": "valence.valence.doc_events.workflow_state_change.before_insert",
